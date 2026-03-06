@@ -72,6 +72,15 @@ export default async function handler(req: Request) {
         SET status = 'rejected', validated_by = ${user}, validated_at = NOW()
         WHERE id = ${emailId}
       `;
+      // Marquer comme lu dans Gmail
+      if (email.gmail_id) {
+        const gmail = getGmailClient();
+        await gmail.users.messages.modify({
+          userId: 'me',
+          id: email.gmail_id,
+          requestBody: { removeLabelIds: ['UNREAD'] },
+        }).catch(() => {/* silencieux */});
+      }
       return jsonResponse({ success: true, action: 'rejected' });
     }
 
@@ -97,6 +106,12 @@ export default async function handler(req: Request) {
       // NORMAL et FAIBLE    → envoi direct
       const sendDirect = ['NORMAL', 'FAIBLE'].includes(email.classification);
 
+      const markAsRead = () => gmail.users.messages.modify({
+        userId: 'me',
+        id: email.gmail_id,
+        requestBody: { removeLabelIds: ['UNREAD'] },
+      }).catch(() => {/* silencieux */});
+
       if (sendDirect) {
         await gmail.users.messages.send({
           userId: 'me',
@@ -108,6 +123,7 @@ export default async function handler(req: Request) {
               final_response = ${responseText}
           WHERE id = ${emailId}
         `;
+        await markAsRead();
         return jsonResponse({ success: true, action: 'sent' });
 
       } else {
@@ -124,6 +140,7 @@ export default async function handler(req: Request) {
               final_response = ${responseText}
           WHERE id = ${emailId}
         `;
+        await markAsRead();
         return jsonResponse({ success: true, action: 'draft_saved' });
       }
     }

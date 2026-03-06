@@ -10,15 +10,15 @@ import { classifyAndDraftEmail } from './_claude.js';
 export default async function handler(req: Request) {
   const gmail = getGmailClient();
 
-  // ── Mode compteur : retourne juste le nombre de mails non lus ──
+  // ── Mode compteur : retourne le nombre réel de mails non lus ──
   if (new URL(req.url).searchParams.get('count') === 'true') {
     try {
       const listRes = await gmail.users.messages.list({
         userId: 'me',
         q: 'is:unread -from:me newer_than:3d',
-        maxResults: 1,
+        maxResults: 50,
       });
-      return jsonResponse({ count: listRes.data.resultSizeEstimate ?? 0 });
+      return jsonResponse({ count: listRes.data.messages?.length ?? 0 });
     } catch (err) {
       return jsonResponse({ count: 0 });
     }
@@ -96,12 +96,6 @@ export default async function handler(req: Request) {
         // Ignorer les emails trop courts (accusés de réception, etc.)
         if (bodyText.trim().length < 10) {
           skipped++;
-          // Marquer comme lu pour ne plus le reprendre
-          await gmail.users.messages.modify({
-            userId: 'me',
-            id: gmailId,
-            requestBody: { removeLabelIds: ['UNREAD'] },
-          });
           continue;
         }
 
@@ -146,13 +140,6 @@ export default async function handler(req: Request) {
             ON CONFLICT (gmail_id) DO NOTHING
           `;
         }
-
-        // ── 7. Marquer comme lu dans Gmail ──
-        await gmail.users.messages.modify({
-          userId: 'me',
-          id: gmailId,
-          requestBody: { removeLabelIds: ['UNREAD'] },
-        });
 
         processed++;
         console.log(`[poll-emails] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
