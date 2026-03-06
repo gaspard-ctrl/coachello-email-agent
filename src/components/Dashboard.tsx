@@ -62,8 +62,13 @@ export default function Dashboard() {
     setPollResult(null)
     try {
       const res  = await fetch('/api/poll')
-      const data = await res.json()
-      if (data.success) {
+      const text = await res.text()
+      let data: any
+      try { data = JSON.parse(text) } catch { data = null }
+
+      if (!res.ok) {
+        setPollResult(`Erreur ${res.status} — voir logs Netlify`)
+      } else if (data?.success) {
         setPollResult(
           data.processed > 0
             ? `${data.processed} email(s) traité(s)`
@@ -71,13 +76,13 @@ export default function Dashboard() {
         )
         if (data.processed > 0) fetchEmails()
       } else {
-        setPollResult(`Erreur : ${data.error ?? 'inconnue'}`)
+        setPollResult(`Erreur : ${data?.error ?? 'réponse invalide'}`)
       }
-    } catch {
-      setPollResult('Impossible de contacter le serveur')
+    } catch (err) {
+      setPollResult(`Réseau : ${err instanceof Error ? err.message : 'inconnu'}`)
     }
     setPolling(false)
-    setTimeout(() => setPollResult(null), 5000)
+    setTimeout(() => setPollResult(null), 8000)
   }
 
   // Après valider/rejeter : fermer et rafraîchir
