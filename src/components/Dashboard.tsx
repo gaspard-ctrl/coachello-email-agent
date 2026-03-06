@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [polling, setPolling]         = useState(false)
   const [pollResult, setPollResult]   = useState<string | null>(null)
+  const [refreshed, setRefreshed]     = useState(false)
   const [pollProgress, setPollProgress] = useState<{ done: number; total: number } | null>(null)
   const [unreadCount, setUnreadCount] = useState<number | null>(null)
 
@@ -46,6 +47,8 @@ export default function Dashboard() {
       setEmails(data.emails  ?? [])
       setStats(data.stats    ?? [])
       setLastRefresh(new Date())
+      setRefreshed(true)
+      setTimeout(() => setRefreshed(false), 2000)
     } catch (err) {
       console.error('Erreur fetchEmails:', err)
     } finally {
@@ -249,7 +252,7 @@ export default function Dashboard() {
           onClick={fetchEmails}
           className="hover:text-indigo-600 transition-colors underline underline-offset-2"
         >
-          Actualiser
+          {refreshed ? 'Actualisé ✓' : 'Actualiser'}
         </button>
         <span>— {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>

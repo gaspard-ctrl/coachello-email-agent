@@ -147,6 +147,27 @@ export default async function handler(req: Request) {
           `;
         }
 
+        // ── 7. Alerte si URGENT ──
+        if (result.classification === 'URGENT') {
+          try {
+            const senderEmail  = process.env.GMAIL_ADDRESS ?? 'contact@coachello.io';
+            const alertAddress = process.env.URGENT_ALERT_EMAIL ?? 'gaspard@coachello.io';
+            const alertRaw     = buildRawEmail({
+              to:      alertAddress,
+              from:    senderEmail,
+              subject: '🚨 MAIL URGENT SUR LA BOITE COACH',
+              body: `Un email urgent vient d'arriver sur la boîte Coachello.\n\nDe : ${fromName ? `${fromName} ` : ''}${fromEmail}\nObjet : ${subject}\n\nAnalyse : ${result.reasoning}\n\n→ Traiter sur https://coachello-email-agent.netlify.app`,
+            });
+            await gmail.users.messages.send({
+              userId: 'me',
+              requestBody: { raw: alertRaw },
+            });
+            console.log(`[poll-emails] Alerte URGENT envoyée à ${alertAddress}`);
+          } catch (alertErr) {
+            console.error('[poll-emails] Échec envoi alerte URGENT:', alertErr);
+          }
+        }
+
         processed++;
         console.log(`[poll-emails] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
         break; // 1 email traité par appel (anti-timeout), le suivant sera pris au prochain appel

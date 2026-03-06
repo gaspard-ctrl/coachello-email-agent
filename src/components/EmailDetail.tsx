@@ -24,7 +24,7 @@ export default function EmailDetail({ email, onClose, onAction }: Props) {
   const attachments = Array.isArray(email.attachments) ? email.attachments : []
   const gmailUrl    = `https://mail.google.com/mail/u/0/#inbox/${email.gmail_id}`
 
-  const sendAction = async (action: 'validate' | 'reject') => {
+  const sendAction = async (action: 'validate' | 'reject' | 'draft') => {
     setLoading(true)
     setFeedback(null)
     try {
@@ -39,6 +39,9 @@ export default function EmailDetail({ email, onClose, onAction }: Props) {
 
       if (action === 'validate') {
         setFeedback(data.action === 'sent' ? 'Réponse envoyée ✓' : 'Brouillon enregistré dans Gmail ✓')
+        setTimeout(onAction, 1200)
+      } else if (action === 'draft') {
+        setFeedback('Brouillon enregistré dans Gmail ✓')
         setTimeout(onAction, 1200)
       } else {
         setFeedback('Email rejeté')
@@ -175,8 +178,8 @@ export default function EmailDetail({ email, onClose, onAction }: Props) {
       <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-3 flex-shrink-0">
         <p className="text-xs text-gray-400">
           {['NORMAL', 'FAIBLE'].includes(email.classification)
-            ? '→ Envoi direct depuis Gmail'
-            : '→ Sauvegarde en brouillon Gmail (validation finale à faire)'
+            ? '→ "Brouillon Gmail" pour réviser dans Gmail · "Envoyer" pour envoyer directement'
+            : '→ "Brouillon Gmail" pour valider et envoyer depuis Gmail'
           }
         </p>
 
@@ -195,21 +198,28 @@ export default function EmailDetail({ email, onClose, onAction }: Props) {
                 Rejeter
               </button>
               <button
-                onClick={() => sendAction('validate')}
+                onClick={() => sendAction('draft')}
                 disabled={loading || !response.trim()}
-                className="btn-success text-sm"
+                className="btn-ghost text-sm"
               >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                    Envoi...
-                  </span>
-                ) : (
-                  ['NORMAL', 'FAIBLE'].includes(email.classification)
-                    ? '✓ Valider et envoyer'
-                    : '✓ Valider (brouillon)'
-                )}
+                {loading ? '...' : 'Brouillon Gmail'}
               </button>
+              {['NORMAL', 'FAIBLE'].includes(email.classification) && (
+                <button
+                  onClick={() => sendAction('validate')}
+                  disabled={loading || !response.trim()}
+                  className="btn-success text-sm"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                      Envoi...
+                    </span>
+                  ) : (
+                    'Envoyer'
+                  )}
+                </button>
+              )}
             </>
           )}
         </div>

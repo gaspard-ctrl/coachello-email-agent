@@ -18,8 +18,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function EmailCard({ email, onOpen }: Props) {
-  const conf    = CLASSIFICATION_CONFIG[email.classification]
-  const isLocked = email.status === 'locked'
+  const conf = CLASSIFICATION_CONFIG[email.classification]
 
   return (
     <button
@@ -34,14 +33,7 @@ export default function EmailCard({ email, onOpen }: Props) {
           </p>
           <p className="text-xs text-gray-500 truncate">{email.from_email}</p>
         </div>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <span className="text-xs text-gray-400">{timeAgo(email.received_at)}</span>
-          {isLocked && (
-            <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
-              🔒 En cours
-            </span>
-          )}
-        </div>
+        <span className="text-xs text-gray-400 flex-shrink-0">{timeAgo(email.received_at)}</span>
       </div>
 
       {/* Objet */}

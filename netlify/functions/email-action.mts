@@ -145,6 +145,44 @@ export default async function handler(req: Request) {
       }
     }
 
+    // ──────────────────────────────────────────────────
+    // ACTION : draft (brouillon Gmail pour tout type d'email)
+    // ──────────────────────────────────────────────────
+    if (action === 'draft') {
+      const responseText = final_response ?? email.draft_response;
+      if (!responseText) return errorResponse('Aucun texte de réponse fourni', 400);
+
+      const gmail       = getGmailClient();
+      const senderEmail = process.env.GMAIL_ADDRESS ?? 'contact@coachello.io';
+
+      const raw = buildRawEmail({
+        to:       email.from_email,
+        from:     senderEmail,
+        subject:  email.subject,
+        body:     responseText,
+        threadId: email.thread_id,
+      });
+
+      await gmail.users.drafts.create({
+        userId: 'me',
+        requestBody: {
+          message: { raw, threadId: email.thread_id },
+        },
+      });
+      await db`
+        UPDATE emails
+        SET status = 'draft_saved', validated_by = ${user}, validated_at = NOW(),
+            final_response = ${responseText}
+        WHERE id = ${emailId}
+      `;
+      await gmail.users.messages.modify({
+        userId: 'me',
+        id: email.gmail_id,
+        requestBody: { removeLabelIds: ['UNREAD'] },
+      }).catch(() => {/* silencieux */});
+      return jsonResponse({ success: true, action: 'draft_saved' });
+    }
+
     return errorResponse(`Action inconnue : ${action}`, 400);
 
   } catch (err) {
