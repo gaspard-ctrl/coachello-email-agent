@@ -54,6 +54,31 @@ export function getHeader(headers: any[], name: string): string {
   return headers?.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 }
 
+// Extraire les pièces jointes d'un message Gmail
+export interface GmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+}
+
+export function extractAttachments(payload: any): GmailAttachment[] {
+  const attachments: GmailAttachment[] = [];
+  function scan(part: any) {
+    if (part?.filename && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename,
+        mimeType: part.mimeType ?? 'application/octet-stream',
+        size: part.body.size ?? 0,
+        attachmentId: part.body.attachmentId,
+      });
+    }
+    if (part?.parts) part.parts.forEach(scan);
+  }
+  if (payload) scan(payload);
+  return attachments;
+}
+
 // Construire un email brut RFC 2822 encodé en base64url (pour envoi/brouillon)
 export function buildRawEmail(opts: {
   to: string;

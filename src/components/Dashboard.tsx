@@ -26,55 +26,55 @@ export default function Dashboard() {
     }
   }, [])
 
-  // Chargement initial + refresh automatique toutes les 2 minutes
   useEffect(() => {
     fetchEmails()
     const interval = setInterval(fetchEmails, 2 * 60 * 1000)
     return () => clearInterval(interval)
   }, [fetchEmails])
 
-  // Ouvrir un email : verrouiller pour l'équipe
+  // Ouvrir un email : tenter de verrouiller, puis afficher le modal
   const handleOpen = async (email: Email) => {
-    // Tenter de lock
-    const res  = await fetch(`/api/emails/${email.id}/lock`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: 'team' }),
-    })
-    const data = await res.json()
-
-    if (res.status === 409) {
-      alert(`Cet email est en cours de traitement par ${data.locked_by}`)
-      return
+    try {
+      const res = await fetch(`/api/emails/${email.id}/lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: 'team' }),
+      })
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}))
+        alert(`Cet email est en cours de traitement par ${(data as any).locked_by ?? 'un collègue'}`)
+        return
+      }
+      if (res.ok) {
+        setEmails(prev => prev.map(e => e.id === email.id ? { ...e, status: 'locked' } : e))
+      }
+    } catch {
+      // Lock failed (DB indisponible) — on ouvre quand même en lecture
     }
-
-    // Récupérer l'email complet
-    const fullRes  = await fetch(`/api/emails?status=locked`)
-    const fullData = await fullRes.json()
-    const fullEmail = (fullData.emails as Email[]).find(e => e.id === email.id) ?? email
-
-    setSelected(fullEmail)
-    setEmails(prev => prev.map(e => e.id === email.id ? { ...e, status: 'locked' } : e))
+    setSelected(email)
   }
 
-  // Fermer le panneau détail : déverrouiller
+  // Fermer le modal : déverrouiller
   const handleClose = async () => {
     if (!selectedEmail) return
-    await fetch(`/api/emails/${selectedEmail.id}/unlock`, { method: 'POST' })
+    try {
+      await fetch(`/api/emails/${selectedEmail.id}/unlock`, { method: 'POST' })
+    } catch {
+      // ignore
+    }
     setSelected(null)
     fetchEmails()
   }
 
-  // Après une action (valider/rejeter), rafraîchir
+  // Après valider/rejeter : fermer et rafraîchir
   const handleAction = () => {
     setSelected(null)
     fetchEmails()
   }
 
-  // Compter les emails par colonne
   const countForColumn = (classification: Classification) =>
     emails.filter(e => e.classification === classification).length
 
-  // Stats totales par classification (toutes statuses confondus)
   const totalForColumn = (classification: Classification) => {
     const relevant = stats.filter(s => s.classification === classification)
     return relevant.reduce((sum, s) => sum + parseInt(s.count), 0)
@@ -89,17 +89,16 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-8rem)]">
+    <div className="flex gap-4 h-[calc(100vh-8rem)]">
 
-      {/* ── Colonnes du Kanban ── */}
-      <div className={`flex gap-4 flex-1 ${selectedEmail ? 'hidden lg:flex' : 'flex'}`}>
+      {/* ── Colonnes du Kanban (toujours visibles) ── */}
+      <div className="flex gap-4 flex-1">
         {COLUMNS.map(classification => {
-          const conf          = CLASSIFICATION_CONFIG[classification]
-          const columnEmails  = emails.filter(e => e.classification === classification)
+          const conf         = CLASSIFICATION_CONFIG[classification]
+          const columnEmails = emails.filter(e => e.classification === classification)
 
           return (
             <div key={classification} className="flex-1 flex flex-col min-w-0">
-              {/* En-tête de colonne */}
               <div className={`flex items-center justify-between px-3 py-2 rounded-lg mb-3 ${conf.bg} ${conf.border} border`}>
                 <div className="flex items-center gap-2">
                   <span className={`w-2.5 h-2.5 rounded-full ${
@@ -118,7 +117,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Cartes emails */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                 {columnEmails.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">
@@ -139,29 +137,32 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* ── Panneau détail ── */}
+      {/* ── Modal email ── */}
       {selectedEmail && (
-        <div className="w-full lg:w-[55%] flex-shrink-0">
-          <EmailDetail
-            email={selectedEmail}
-            onClose={handleClose}
-            onAction={handleAction}
-          />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={e => { if (e.target === e.currentTarget) handleClose() }}
+        >
+          <div className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-xl overflow-hidden shadow-2xl">
+            <EmailDetail
+              email={selectedEmail}
+              onClose={handleClose}
+              onAction={handleAction}
+            />
+          </div>
         </div>
       )}
 
-      {/* ── Barre du bas : refresh info ── */}
-      {!selectedEmail && (
-        <div className="fixed bottom-4 right-6 text-xs text-gray-400 flex items-center gap-2">
-          <button
-            onClick={fetchEmails}
-            className="hover:text-indigo-600 transition-colors underline underline-offset-2"
-          >
-            Actualiser
-          </button>
-          <span>— mis à jour à {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-        </div>
-      )}
+      {/* ── Barre du bas ── */}
+      <div className="fixed bottom-4 right-6 text-xs text-gray-400 flex items-center gap-2">
+        <button
+          onClick={fetchEmails}
+          className="hover:text-indigo-600 transition-colors underline underline-offset-2"
+        >
+          Actualiser
+        </button>
+        <span>— mis à jour à {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
     </div>
   )
 }

@@ -1,6 +1,13 @@
 export type Classification = 'URGENT' | 'IMPORTANT' | 'NORMAL' | 'FAIBLE';
 export type EmailStatus = 'pending' | 'locked' | 'validated' | 'rejected' | 'sent' | 'draft_saved';
 
+export interface EmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+}
+
 export interface Email {
   id: string;
   gmail_id: string;
@@ -23,6 +30,7 @@ export interface Email {
   validated_by: string | null;
   final_response: string | null;
   created_at: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface Stats {

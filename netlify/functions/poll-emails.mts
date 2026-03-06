@@ -4,7 +4,7 @@
 // ============================================================
 // import type { Config } from '@netlify/functions'; // à réactiver avec le cron
 import { getDb } from './_db.js';
-import { getGmailClient, extractBody, getHeader } from './_gmail.js';
+import { getGmailClient, extractBody, extractAttachments, getHeader } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export default async function handler() {
@@ -76,6 +76,7 @@ export default async function handler() {
         const fromEmail = (fromMatch[2] ?? fromRaw).trim();
 
         const { text: bodyText, html: bodyHtml } = extractBody(payload);
+        const attachments = extractAttachments(payload);
 
         // Ignorer les emails trop courts (accusés de réception, etc.)
         if (bodyText.trim().length < 10) {
@@ -105,11 +106,12 @@ export default async function handler() {
           INSERT INTO emails (
             gmail_id, thread_id, from_email, from_name, to_email,
             subject, body_text, body_html, received_at,
-            classification, reasoning, draft_response, status
+            classification, reasoning, draft_response, status, attachments
           ) VALUES (
             ${gmailId}, ${threadId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw},
             ${subject}, ${bodyText}, ${bodyHtml}, ${receivedAt},
-            ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending'
+            ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending',
+            ${JSON.stringify(attachments)}::jsonb
           )
           ON CONFLICT (gmail_id) DO NOTHING
         `;

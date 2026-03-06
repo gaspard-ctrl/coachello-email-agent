@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS emails (
   validated_at    TIMESTAMP,
   validated_by    VARCHAR(255),
   final_response  TEXT,
+  attachments     JSONB DEFAULT '[]',
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );

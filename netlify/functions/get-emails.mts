@@ -29,11 +29,13 @@ export default async function handler(req: Request) {
     if (status && classification) {
       emails = await db`
         SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+               LEFT(body_text, 5000) AS body_text,
                LEFT(body_text, 200) AS body_preview,
                received_at, classification, reasoning,
                LEFT(draft_response, 300) AS draft_preview,
                draft_response, status, locked_by, locked_at,
-               validated_at, validated_by, created_at
+               validated_at, validated_by, created_at,
+               COALESCE(attachments, '[]'::jsonb) AS attachments
         FROM emails
         WHERE status = ${status} AND classification = ${classification}
         ORDER BY
@@ -49,11 +51,13 @@ export default async function handler(req: Request) {
     } else if (status) {
       emails = await db`
         SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+               LEFT(body_text, 5000) AS body_text,
                LEFT(body_text, 200) AS body_preview,
                received_at, classification, reasoning,
                LEFT(draft_response, 300) AS draft_preview,
                draft_response, status, locked_by, locked_at,
-               validated_at, validated_by, created_at
+               validated_at, validated_by, created_at,
+               COALESCE(attachments, '[]'::jsonb) AS attachments
         FROM emails
         WHERE status = ${status}
         ORDER BY
@@ -70,11 +74,13 @@ export default async function handler(req: Request) {
       // Par défaut : les emails en attente de validation
       emails = await db`
         SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+               LEFT(body_text, 5000) AS body_text,
                LEFT(body_text, 200) AS body_preview,
                received_at, classification, reasoning,
                LEFT(draft_response, 300) AS draft_preview,
                draft_response, status, locked_by, locked_at,
-               validated_at, validated_by, created_at
+               validated_at, validated_by, created_at,
+               COALESCE(attachments, '[]'::jsonb) AS attachments
         FROM emails
         WHERE status IN ('pending', 'locked')
         ORDER BY
