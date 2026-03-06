@@ -23,13 +23,8 @@ export default function EmailCard({ email, onOpen }: Props) {
 
   return (
     <button
-      onClick={() => !isLocked && onOpen(email)}
-      disabled={isLocked}
-      className={`w-full text-left p-3 rounded-lg border transition-all duration-150 ${
-        isLocked
-          ? 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
-          : `${conf.bg} ${conf.border} hover:shadow-md hover:-translate-y-0.5 cursor-pointer`
-      }`}
+      onClick={() => onOpen(email)}
+      className={`w-full text-left p-3 rounded-lg border transition-all duration-150 ${conf.bg} ${conf.border} hover:shadow-md hover:-translate-y-0.5 cursor-pointer`}
     >
       {/* En-tête carte */}
       <div className="flex items-start justify-between gap-2 mb-1.5">

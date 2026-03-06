@@ -50,25 +50,11 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [fetchEmails, fetchUnreadCount])
 
-  // Ouvrir le modal immédiatement, locker en arrière-plan
   const handleOpen = (email: Email) => {
     setSelected(email)
-    setEmails(prev => prev.map(e => e.id === email.id ? { ...e, status: 'locked' } : e))
-    fetch(`/api/emails/${email.id}/lock`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: 'team' }),
-    }).catch(() => {/* silencieux */})
   }
 
-  // Fermer le modal : déverrouiller
-  const handleClose = async () => {
-    if (!selectedEmail) return
-    try {
-      await fetch(`/api/emails/${selectedEmail.id}/unlock`, { method: 'POST' })
-    } catch {
-      // ignore
-    }
+  const handleClose = () => {
     setSelected(null)
     fetchEmails()
   }
