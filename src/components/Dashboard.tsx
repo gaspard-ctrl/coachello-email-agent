@@ -11,6 +11,8 @@ export default function Dashboard() {
   const [selectedEmail, setSelected]  = useState<Email | null>(null)
   const [loading, setLoading]         = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [polling, setPolling]         = useState(false)
+  const [pollResult, setPollResult]   = useState<string | null>(null)
 
   const fetchEmails = useCallback(async () => {
     try {
@@ -64,6 +66,29 @@ export default function Dashboard() {
     }
     setSelected(null)
     fetchEmails()
+  }
+
+  const handlePoll = async () => {
+    setPolling(true)
+    setPollResult(null)
+    try {
+      const res  = await fetch('/api/poll')
+      const data = await res.json()
+      if (data.success) {
+        setPollResult(
+          data.processed > 0
+            ? `${data.processed} email(s) traité(s)`
+            : 'Aucun nouveau mail'
+        )
+        if (data.processed > 0) fetchEmails()
+      } else {
+        setPollResult(`Erreur : ${data.error ?? 'inconnue'}`)
+      }
+    } catch {
+      setPollResult('Impossible de contacter le serveur')
+    }
+    setPolling(false)
+    setTimeout(() => setPollResult(null), 5000)
   }
 
   // Après valider/rejeter : fermer et rafraîchir
@@ -154,14 +179,31 @@ export default function Dashboard() {
       )}
 
       {/* ── Barre du bas ── */}
-      <div className="fixed bottom-4 right-6 text-xs text-gray-400 flex items-center gap-2">
+      <div className="fixed bottom-4 right-6 text-xs text-gray-400 flex items-center gap-3">
+        {pollResult && (
+          <span className={`px-2.5 py-1 rounded-lg font-medium ${
+            pollResult.startsWith('Erreur') || pollResult.startsWith('Impossible')
+              ? 'bg-red-50 text-red-600'
+              : 'bg-green-50 text-green-700'
+          }`}>
+            {pollResult}
+          </span>
+        )}
+        <button
+          onClick={handlePoll}
+          disabled={polling}
+          className="hover:text-indigo-600 transition-colors underline underline-offset-2 disabled:opacity-50"
+        >
+          {polling ? 'Polling...' : 'Lancer le polling'}
+        </button>
+        <span>·</span>
         <button
           onClick={fetchEmails}
           className="hover:text-indigo-600 transition-colors underline underline-offset-2"
         >
           Actualiser
         </button>
-        <span>— mis à jour à {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+        <span>— {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
     </div>
   )

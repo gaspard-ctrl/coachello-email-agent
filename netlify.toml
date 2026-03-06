@@ -13,6 +13,11 @@
 
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
+  from   = "/api/poll"
+  to     = "/.netlify/functions/poll-emails"
+  status = 200
+
+[[redirects]]
   from   = "/api/emails"
   to     = "/.netlify/functions/get-emails"
   status = 200

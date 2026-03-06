@@ -3,7 +3,7 @@
 // Sur Netlify Pro : activer le cron dans netlify.toml
 // ============================================================
 // import type { Config } from '@netlify/functions'; // à réactiver avec le cron
-import { getDb } from './_db.js';
+import { getDb, corsHeaders, jsonResponse } from './_db.js';
 import { getGmailClient, extractBody, extractAttachments, getHeader } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
@@ -101,20 +101,36 @@ export default async function handler() {
           body: bodyText.slice(0, 3000), // Limiter à 3000 chars pour économiser les tokens
         });
 
-        // ── 6. Stocker en base ──
-        await db`
-          INSERT INTO emails (
-            gmail_id, thread_id, from_email, from_name, to_email,
-            subject, body_text, body_html, received_at,
-            classification, reasoning, draft_response, status, attachments
-          ) VALUES (
-            ${gmailId}, ${threadId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw},
-            ${subject}, ${bodyText}, ${bodyHtml}, ${receivedAt},
-            ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending',
-            ${JSON.stringify(attachments)}::jsonb
-          )
-          ON CONFLICT (gmail_id) DO NOTHING
-        `;
+        // ── 6. Stocker en base (avec fallback si colonne attachments absente) ──
+        try {
+          await db`
+            INSERT INTO emails (
+              gmail_id, thread_id, from_email, from_name, to_email,
+              subject, body_text, body_html, received_at,
+              classification, reasoning, draft_response, status, attachments
+            ) VALUES (
+              ${gmailId}, ${threadId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw},
+              ${subject}, ${bodyText}, ${bodyHtml}, ${receivedAt},
+              ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending',
+              ${JSON.stringify(attachments)}::jsonb
+            )
+            ON CONFLICT (gmail_id) DO NOTHING
+          `;
+        } catch {
+          // Fallback sans attachments (colonne pas encore créée via ALTER TABLE)
+          await db`
+            INSERT INTO emails (
+              gmail_id, thread_id, from_email, from_name, to_email,
+              subject, body_text, body_html, received_at,
+              classification, reasoning, draft_response, status
+            ) VALUES (
+              ${gmailId}, ${threadId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw},
+              ${subject}, ${bodyText}, ${bodyHtml}, ${receivedAt},
+              ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending'
+            )
+            ON CONFLICT (gmail_id) DO NOTHING
+          `;
+        }
 
         // ── 7. Marquer comme lu dans Gmail ──
         await gmail.users.messages.modify({
@@ -133,11 +149,14 @@ export default async function handler() {
     }
 
     console.log(`[poll-emails] Terminé : ${processed} traité(s), ${skipped} ignoré(s)`);
-    return new Response('OK', { status: 200 });
+    return jsonResponse({ success: true, processed, skipped, total: messages.length });
 
   } catch (err) {
     console.error('[poll-emails] Erreur fatale:', err);
-    return new Response('Erreur interne', { status: 500 });
+    return new Response(JSON.stringify({ success: false, error: String(err) }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 }
 
