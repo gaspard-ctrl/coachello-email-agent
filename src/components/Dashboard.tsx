@@ -90,34 +90,22 @@ export default function Dashboard() {
     setPollResult(null)
     setPollProgress(null)
 
-    let totalProcessed = 0
-    const MAX_ITERATIONS = 20
+    try {
+      const res  = await fetch('/api/poll')
+      const text = await res.text()
+      let data: any
+      try { data = JSON.parse(text) } catch { data = null }
 
-    for (let i = 0; i < MAX_ITERATIONS; i++) {
-      try {
-        const res  = await fetch('/api/poll')
-        const text = await res.text()
-        let data: any
-        try { data = JSON.parse(text) } catch { data = null }
-
-        if (!res.ok || !data?.success) {
-          setPollResult(`Erreur ${res.status} — voir logs Netlify`)
-          break
-        }
-
-        totalProcessed += data.processed
-        setPollProgress({ done: totalProcessed, total: totalProcessed + (data.total ?? 0) })
-
+      if (!res.ok || !data?.success) {
+        setPollResult(`Erreur ${res.status}`)
+      } else {
+        setPollResult(data.processed > 0 ? `${data.processed} email(s) traité(s)` : 'Aucun nouveau mail')
         if (data.processed > 0) fetchEmails()
-        if (data.processed === 0) break  // plus rien à traiter
-
-      } catch (err) {
-        setPollResult(`Réseau : ${err instanceof Error ? err.message : 'inconnu'}`)
-        break
       }
+    } catch (err) {
+      setPollResult(`Erreur réseau`)
     }
 
-    setPollResult(totalProcessed > 0 ? `${totalProcessed} email(s) traité(s)` : 'Aucun nouveau mail')
     setPolling(false)
     setPollProgress(null)
     fetchUnreadCount()
