@@ -29,6 +29,26 @@ export default async function handler(req: Request) {
   const db = getDb();
 
   try {
+    // ── 0. Sync : retirer du dashboard les emails lus externalement dans Gmail ──
+    try {
+      const pendingRows = await db`SELECT id, gmail_id FROM emails WHERE status IN ('pending', 'locked')`;
+      const pending = (pendingRows as any[]);
+      if (pending.length > 0) {
+        const unreadRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: 'is:unread -from:me newer_than:7d',
+          maxResults: 100,
+        });
+        const unreadIds = new Set((unreadRes.data.messages ?? []).map((m: any) => m.id));
+        const toSync = pending.filter(p => !unreadIds.has(p.gmail_id));
+        if (toSync.length > 0) {
+          const ids = toSync.map(p => p.id);
+          await db`UPDATE emails SET status = 'dismissed' WHERE id = ANY(${ids})`;
+          console.log(`[poll-emails] ${toSync.length} email(s) lus dans Gmail → dismissed`);
+        }
+      }
+    } catch {/* silencieux */}
+
     // ── 1. Charger le guide, les exemples et les règles depuis la BDD ──
     const [guideRows, exampleRows, ruleRows] = await Promise.all([
       db`SELECT content FROM guide ORDER BY updated_at DESC LIMIT 1`,

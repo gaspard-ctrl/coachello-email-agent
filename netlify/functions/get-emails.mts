@@ -3,6 +3,7 @@
 // ============================================================
 import type { Config } from '@netlify/functions';
 import { getDb, corsHeaders, jsonResponse, errorResponse } from './_db.js';
+import { getGmailClient } from './_gmail.js';
 
 export default async function handler(req: Request) {
   // Preflight CORS
@@ -17,6 +18,26 @@ export default async function handler(req: Request) {
   try {
     const db  = getDb();
     const url = new URL(req.url);
+
+    // ── Sync Gmail : retirer les emails lus externalement ──
+    try {
+      const pendingRows = await db`SELECT id, gmail_id FROM emails WHERE status IN ('pending', 'locked')`;
+      const pending = pendingRows as any[];
+      if (pending.length > 0) {
+        const gmail = getGmailClient();
+        const listRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: 'is:unread -from:me newer_than:7d',
+          maxResults: 100,
+        });
+        const unreadIds = new Set((listRes.data.messages ?? []).map((m: any) => m.id));
+        const toSync = pending.filter(p => !unreadIds.has(p.gmail_id));
+        if (toSync.length > 0) {
+          const ids = toSync.map(p => p.id);
+          await db`UPDATE emails SET status = 'dismissed' WHERE id = ANY(${ids})`;
+        }
+      }
+    } catch {/* silencieux — ne pas bloquer si Gmail échoue */}
 
     // Filtres optionnels
     const status         = url.searchParams.get('status');         // pending, locked, validated...

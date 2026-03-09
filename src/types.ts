@@ -1,5 +1,5 @@
 export type Classification = 'URGENT' | 'IMPORTANT' | 'NORMAL' | 'FAIBLE';
-export type EmailStatus = 'pending' | 'locked' | 'validated' | 'rejected' | 'sent' | 'draft_saved';
+export type EmailStatus = 'pending' | 'locked' | 'validated' | 'rejected' | 'sent' | 'draft_saved' | 'dismissed';
 
 export interface EmailAttachment {
   filename: string;
