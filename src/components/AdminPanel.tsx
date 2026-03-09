@@ -40,7 +40,7 @@ function GuideAndExamplesTab() {
   const [filename, setFilename]   = useState<string>('')
   const [saving, setSaving]       = useState(false)
   const [feedback, setFeedback]   = useState<string | null>(null)
-  const [editing, setEditing]     = useState(false)
+  const [editing, setEditing]     = useState(true)
 
   const [examples, setExamples]   = useState<Example[]>([])
   const [showForm, setShowForm]   = useState(false)
@@ -58,7 +58,6 @@ function GuideAndExamplesTab() {
       .then(d => {
         setGuide(d.guide?.content ?? '')
         setFilename(d.guide?.filename ?? '')
-        if (!d.guide?.content) setEditing(true)
       })
     loadExamples()
   }, [])
@@ -92,13 +91,22 @@ function GuideAndExamplesTab() {
   // ── Guide : sauvegarder le texte édité ──
   const handleSaveText = async () => {
     setSaving(true)
-    const res = await fetch('/api/guide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: guide, filename: filename || 'guide_manuel.txt' }),
-    })
-    if (res.ok) { setFeedback('Guide sauvegardé ✓'); setEditing(false) }
-    else setFeedback('Erreur lors de la sauvegarde')
+    try {
+      const res = await fetch('/api/guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: guide, filename: filename || 'guide_manuel.txt' }),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) {
+        setFeedback('Guide sauvegardé ✓')
+        setEditing(false)
+      } else {
+        setFeedback(`Erreur ${res.status} : ${data?.error ?? 'inconnu'}`)
+      }
+    } catch (err) {
+      setFeedback(`Erreur réseau : ${err instanceof Error ? err.message : 'inconnu'}`)
+    }
     setSaving(false)
   }
 
@@ -196,7 +204,7 @@ function GuideAndExamplesTab() {
             />
             <div className="flex items-center justify-between">
               {feedback
-                ? <span className="text-sm text-green-700 bg-green-50 px-3 py-1.5 rounded-lg">{feedback}</span>
+                ? <span className={`text-sm px-3 py-1.5 rounded-lg ${feedback.startsWith('Erreur') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{feedback}</span>
                 : <span />
               }
               <button onClick={handleSaveText} disabled={saving} className="btn-primary text-sm">
@@ -204,19 +212,11 @@ function GuideAndExamplesTab() {
               </button>
             </div>
           </div>
-        ) : guide ? (
+        ) : (
           <div className="px-8 py-6 max-h-[28rem] overflow-y-auto">
             <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed font-serif">
               {guide}
             </div>
-          </div>
-        ) : (
-          <div className="px-6 py-12 text-center">
-            <p className="text-gray-400 text-sm mb-4">Aucun guide chargé.</p>
-            <label className="btn-primary text-sm cursor-pointer">
-              Importer un fichier (.docx, .txt)
-              <input type="file" accept=".docx,.txt,.md" onChange={handleFileUpload} className="hidden" />
-            </label>
           </div>
         )}
 

@@ -41,7 +41,7 @@ export default async function handler(req: Request) {
     const rules    = ruleRows    as any[];
 
     // ── 2. Récupérer les IDs des emails déjà traités ──
-    const processedRows = await db`SELECT gmail_id FROM emails WHERE created_at > NOW() - INTERVAL '7 days'`;
+    const processedRows = await db`SELECT gmail_id FROM emails WHERE created_at > NOW() - INTERVAL '7 days' AND status NOT IN ('dismissed', 'rejected')`;
     const processedIds  = new Set((processedRows as any[]).map((r: any) => r.gmail_id));
 
     // ── 3. Lister les emails non lus dans Gmail ──
