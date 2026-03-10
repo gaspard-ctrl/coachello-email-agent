@@ -1,13 +1,17 @@
 // ============================================================
-// Polling Gmail — déclenché manuellement (plan gratuit)
-// Sur Netlify Pro : activer le cron dans netlify.toml
+// POST/GET /api/manual-poll — Polling Gmail déclenché manuellement
+// Fonction HTTP (pas de schedule) pour le bouton "Lancer le polling"
 // ============================================================
-// import type { Config } from '@netlify/functions'; // à réactiver avec le cron
+import type { Config } from '@netlify/functions';
 import { getDb, corsHeaders, jsonResponse } from './_db.js';
 import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export default async function handler(req: Request) {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   const gmail = getGmailClient();
 
   // ── Mode compteur : retourne le nombre réel de mails non lus ──
@@ -24,7 +28,7 @@ export default async function handler(req: Request) {
     }
   }
 
-  console.log('[poll-emails] Démarrage du polling Gmail —', new Date().toISOString());
+  console.log('[manual-poll] Démarrage du polling Gmail —', new Date().toISOString());
 
   const db = getDb();
 
@@ -48,11 +52,11 @@ export default async function handler(req: Request) {
     const listRes = await gmail.users.messages.list({
       userId: 'me',
       q: 'is:unread -from:me newer_than:3d',
-      maxResults: 10, // plusieurs pour trouver le prochain non traité
+      maxResults: 10,
     });
 
     const messages = listRes.data.messages ?? [];
-    console.log(`[poll-emails] ${messages.length} email(s) non lu(s) trouvé(s)`);
+    console.log(`[manual-poll] ${messages.length} email(s) non lu(s) trouvé(s)`);
 
     let processed = 0;
     let skipped   = 0;
@@ -99,7 +103,7 @@ export default async function handler(req: Request) {
           effectiveBody = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         }
 
-        // Ignorer les emails vraiment vides (accusés de réception, tracking pixels, etc.)
+        // Ignorer les emails vraiment vides
         if (effectiveBody.length < 5 && subject === '(sans objet)') {
           skipped++;
           continue;
@@ -116,7 +120,7 @@ export default async function handler(req: Request) {
           body: effectiveBody.slice(0, 3000),
         });
 
-        // ── 6. Stocker en base (avec fallback si colonne attachments absente) ──
+        // ── 6. Stocker en base ──
         try {
           await db`
             INSERT INTO emails (
@@ -132,7 +136,6 @@ export default async function handler(req: Request) {
             ON CONFLICT (gmail_id) DO NOTHING
           `;
         } catch {
-          // Fallback sans attachments (colonne pas encore créée via ALTER TABLE)
           await db`
             INSERT INTO emails (
               gmail_id, thread_id, from_email, from_name, to_email,
@@ -162,27 +165,26 @@ export default async function handler(req: Request) {
               userId: 'me',
               requestBody: { raw: alertRaw },
             });
-            console.log(`[poll-emails] Alerte URGENT envoyée à ${alertAddress}`);
+            console.log(`[manual-poll] Alerte URGENT envoyée à ${alertAddress}`);
           } catch (alertErr) {
-            console.error('[poll-emails] Échec envoi alerte URGENT:', alertErr);
+            console.error('[manual-poll] Échec envoi alerte URGENT:', alertErr);
           }
         }
 
         processed++;
-        console.log(`[poll-emails] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
-        break; // 1 email traité par appel (anti-timeout), le suivant sera pris au prochain appel
+        console.log(`[manual-poll] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
+        break; // 1 email traité par appel (anti-timeout)
 
       } catch (err) {
-        console.error(`[poll-emails] ✗ Erreur sur email ${gmailId}:`, err);
-        // On continue avec les autres emails
+        console.error(`[manual-poll] ✗ Erreur sur email ${gmailId}:`, err);
       }
     }
 
-    console.log(`[poll-emails] Terminé : ${processed} traité(s), ${skipped} ignoré(s)`);
+    console.log(`[manual-poll] Terminé : ${processed} traité(s), ${skipped} ignoré(s)`);
     return jsonResponse({ success: true, processed, skipped, total: messages.length });
 
   } catch (err) {
-    console.error('[poll-emails] Erreur fatale:', err);
+    console.error('[manual-poll] Erreur fatale:', err);
     return new Response(JSON.stringify({ success: false, error: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -190,6 +192,6 @@ export default async function handler(req: Request) {
   }
 }
 
-// Plan gratuit : fonction déclenchée manuellement via GET /.netlify/functions/poll-emails
-// Pour activer le cron automatique, upgrader vers Netlify Pro et décommenter :
-// export const config: Config = { schedule: '*/20 * * * *' };
+export const config: Config = {
+  path: '/api/manual-poll',
+};

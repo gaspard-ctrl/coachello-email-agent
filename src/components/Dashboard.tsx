@@ -56,7 +56,7 @@ export default function Dashboard() {
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res  = await fetch('/api/poll?count=true')
+      const res  = await fetch('/api/manual-poll?count=true')
       const data = await res.json()
       if (data.count !== undefined) setUnreadCount(data.count)
     } catch {
@@ -89,7 +89,7 @@ export default function Dashboard() {
     setPollProgress(null)
 
     try {
-      const res  = await fetch('/api/poll')
+      const res  = await fetch('/api/manual-poll')
       const text = await res.text()
       let data: any
       try { data = JSON.parse(text) } catch { data = null }

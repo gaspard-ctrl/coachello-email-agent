@@ -6,7 +6,7 @@ import postgres from 'postgres';
 export function getDb() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL manquant dans les variables d\'environnement');
-  return postgres(url, { ssl: 'require', max: 1 });
+  return postgres(url, { ssl: 'require', max: 1, connect_timeout: 10, idle_timeout: 20 });
 }
 
 export type EmailStatus = 'pending' | 'locked' | 'validated' | 'rejected' | 'sent' | 'draft_saved';

@@ -12,8 +12,8 @@
 
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
-  from   = "/api/poll"
-  to     = "/.netlify/functions/poll-emails"
+  from   = "/api/manual-poll"
+  to     = "/.netlify/functions/manual-poll"
   status = 200
 
 [[redirects]]
