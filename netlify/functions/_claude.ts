@@ -132,7 +132,7 @@ export async function redraftWithContext(opts: {
     : '';
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 800,
     system: `Tu es l'assistant email de Coachello. Rédige un brouillon de réponse complet et prêt à envoyer.
 ${opts.guide ? `\nGuide : ${opts.guide.slice(0, 1000)}` : ''}
@@ -174,7 +174,7 @@ export async function redraftWithAnswers(opts: {
     : '';
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 800,
     system: `Tu es l'assistant email de Coachello. Rédige un brouillon de réponse complet et prêt à envoyer.
 ${opts.guide ? `\nGuide : ${opts.guide.slice(0, 1000)}` : ''}
