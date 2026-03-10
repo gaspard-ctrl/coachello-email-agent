@@ -230,10 +230,14 @@ export default async function handler(req: Request) {
       const { context } = body as { context?: string };
       if (!context) return errorResponse('context requis', 400);
 
-      const guideRows = await db`SELECT content FROM guide ORDER BY updated_at DESC LIMIT 1`.catch(() => []);
+      const [guideRows, exampleRows] = await Promise.all([
+        db`SELECT content FROM guide ORDER BY updated_at DESC LIMIT 1`.catch(() => []),
+        db`SELECT email_body, ideal_response, classification FROM examples ORDER BY created_at DESC LIMIT 5`.catch(() => []),
+      ]);
 
       const newDraft = await redraftWithContext({
         guide:     (guideRows[0] as any)?.content ?? '',
+        examples:  exampleRows as any[],
         fromEmail: email.from_email,
         fromName:  email.from_name,
         subject:   email.subject,
