@@ -115,10 +115,10 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
     })
 
   const BADGE_STYLE: Record<string, string> = {
-    URGENT:    'bg-[#FEE9E5] text-[#C23B2A]',
-    IMPORTANT: 'bg-[#FFF3E5] text-[#B05A10]',
-    NORMAL:    'bg-[#E8F0FF] text-[#2850A8]',
-    FAIBLE:    'bg-[#F0F0F0] text-[#666]',
+    URGENT:    'bg-[#F0024F] text-white',
+    IMPORTANT: 'bg-[#F768A8] text-white',
+    NORMAL:    'bg-[#FBBED7] text-[#A5002E]',
+    FAIBLE:    'bg-[#FDE8F2] text-[#C8A0BE]',
   }
 
   return (

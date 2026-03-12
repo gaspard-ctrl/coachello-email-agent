@@ -18,10 +18,10 @@ function timeAgo(dateStr: string): string {
 }
 
 const LEFT_BORDER: Record<string, string> = {
-  URGENT:    '#E8452A',
-  IMPORTANT: '#F59E0B',
-  NORMAL:    '#3B6CF8',
-  FAIBLE:    'transparent',
+  URGENT:    '#F0024F',
+  IMPORTANT: '#F768A8',
+  NORMAL:    '#FBBED7',
+  FAIBLE:    '#FDE8F2',
 }
 
 export default function EmailCard({ email, onOpen }: Props) {

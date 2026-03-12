@@ -132,10 +132,10 @@ export default function Dashboard() {
   }
 
   const COLUMN_STYLE: Record<string, { header: string; label: string; badge: string }> = {
-    URGENT:    { header: 'bg-[#FEE9E5]', label: 'text-[#C23B2A] font-bold', badge: 'bg-[#C23B2A] text-white' },
-    IMPORTANT: { header: 'bg-[#FFF3E5]', label: 'text-[#B05A10] font-bold', badge: 'bg-[#B05A10] text-white' },
-    NORMAL:    { header: 'bg-[#E8F0FF]', label: 'text-[#2850A8] font-bold', badge: 'bg-[#2850A8] text-white' },
-    FAIBLE:    { header: 'bg-[#F0F0F0]', label: 'text-[#666] font-bold',    badge: 'bg-[#999] text-white' },
+    URGENT:    { header: 'bg-[#F0024F]', label: 'text-white font-bold',      badge: 'bg-white/30 text-white' },
+    IMPORTANT: { header: 'bg-[#F768A8]', label: 'text-white font-bold',      badge: 'bg-white/30 text-white' },
+    NORMAL:    { header: 'bg-[#FBBED7]', label: 'text-[#A5002E] font-bold',  badge: 'bg-white/50 text-[#A5002E]' },
+    FAIBLE:    { header: 'bg-[#FDE8F2]', label: 'text-[#C8A0BE] font-bold',  badge: 'bg-white/50 text-[#C8A0BE]' },
   }
 
   return (
