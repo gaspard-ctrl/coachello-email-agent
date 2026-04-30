@@ -21,6 +21,9 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
   const [mode, setMode]           = useState<'view' | 'edit'>('view')
   const [feedback, setFeedback]   = useState<string | null>(null)
 
+  // ── Réponses reçues dans le même thread ──
+  const [threadReplies, setThreadReplies] = useState<{ from_name: string; from_email: string; received_at: string }[]>([])
+
   // ── Pièces jointes sortantes ──
   const [outgoingFiles, setOutgoingFiles] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -103,11 +106,25 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
     return () => { fetch(`/api/emails/${email.id}/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'team' }) }).catch(() => {}) }
   }, [email.id])
 
+  // Chercher les réponses reçues dans le même thread (status sent, exclu l'email courant)
+  useEffect(() => {
+    if (!email.thread_id) return
+    fetch(`/api/emails?status=sent`)
+      .then(r => r.json())
+      .then((data: { emails?: { id: string; thread_id: string; from_name: string; from_email: string; received_at: string }[] }) => {
+        const replies = (data.emails ?? []).filter(
+          e => e.thread_id === email.thread_id && e.id !== email.id
+        )
+        setThreadReplies(replies)
+      })
+      .catch(() => {})
+  }, [email.thread_id, email.id])
+
   const handleRedraft = async () => {
     if (!contextText.trim()) return
     setRedraftLoading(true)
     setWaitingForRedraft(true)
-    originalDraftRef.current = response
+    originalDraftRef.current = email.draft_response ?? ''
     try {
       await fetch('/api/redraft', {
         method: 'POST',
@@ -256,8 +273,18 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
           <div className="min-w-0">
             <p className="text-sm font-semibold text-[#1a1a1a] truncate">{email.subject}</p>
             <p className="text-xs text-[#aaa] truncate">
-              {email.from_name && `${email.from_name} · `}{email.from_email} · {formatDate(email.received_at)}
+              <span className="font-medium text-[#888]">De :</span> {email.from_name && `${email.from_name} `}&lt;{email.from_email}&gt; · {formatDate(email.received_at)}
             </p>
+            {email.to_email && (
+              <p className="text-xs text-[#aaa] truncate">
+                <span className="font-medium text-[#888]">À :</span> {email.to_email}
+              </p>
+            )}
+            {email.cc_emails && (
+              <p className="text-xs text-[#aaa] truncate">
+                <span className="font-medium text-[#888]">Cc :</span> {email.cc_emails}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 ml-4">
@@ -285,6 +312,19 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
         {/* Gauche : email reçu */}
         <div className="overflow-y-auto p-5 flex flex-col gap-4">
           {/* Analyse Claude — en haut pour être visible sans scroller */}
+          {threadReplies.length > 0 && (
+            <div className="p-3 bg-[#FFF8E6] rounded-xl border border-[#F5D97A]">
+              <p className="text-[10px] font-bold text-[#B8860B] uppercase tracking-widest mb-1.5">
+                {threadReplies.length === 1 ? '1 réponse reçue dans ce fil' : `${threadReplies.length} réponses reçues dans ce fil`}
+              </p>
+              {threadReplies.map((r, i) => (
+                <p key={i} className="text-xs text-[#7A5F00]">
+                  {r.from_name ? `${r.from_name} <${r.from_email}>` : r.from_email} · {formatDate(r.received_at)}
+                </p>
+              ))}
+            </div>
+          )}
+
           {email.reasoning && (
             <div className="p-3 bg-[#F7F5F2] rounded-xl border border-[#EDE8E0]">
               <p className="text-[10px] font-bold text-[#bbb] uppercase tracking-widest mb-1.5">Analyse de l'agent</p>
@@ -422,7 +462,12 @@ export default function EmailDetail({ email, onClose, onAction, onRefresh }: Pro
               </div>
             )}
 
-            {mode === 'view' ? (
+            {waitingForRedraft ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-dashed border-[#E8E2D9] rounded-xl bg-[#F7F5F2] min-h-[200px]">
+                <div className="animate-spin h-6 w-6 border-2 border-[#E8452A] border-t-transparent rounded-full" />
+                <p className="text-xs text-[#888] font-medium">Rédaction du nouveau brouillon...</p>
+              </div>
+            ) : mode === 'view' ? (
               <div className="text-sm text-[#444] whitespace-pre-wrap leading-relaxed flex-1">
                 {response || <span className="text-[#ccc] italic">Aucun brouillon généré</span>}
               </div>

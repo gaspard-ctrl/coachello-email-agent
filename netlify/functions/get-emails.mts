@@ -28,7 +28,7 @@ export default async function handler(req: Request) {
 
     if (status && classification) {
       emails = await db`
-        SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+        SELECT id, gmail_id, thread_id, from_email, from_name, to_email, cc_emails, subject,
                LEFT(body_text, 5000) AS body_text,
                body_html,
                LEFT(body_text, 200) AS body_preview,
@@ -51,7 +51,7 @@ export default async function handler(req: Request) {
       `;
     } else if (status) {
       emails = await db`
-        SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+        SELECT id, gmail_id, thread_id, from_email, from_name, to_email, cc_emails, subject,
                LEFT(body_text, 5000) AS body_text,
                body_html,
                LEFT(body_text, 200) AS body_preview,
@@ -75,7 +75,7 @@ export default async function handler(req: Request) {
     } else {
       // Par défaut : les emails en attente de validation
       emails = await db`
-        SELECT id, gmail_id, thread_id, from_email, from_name, subject,
+        SELECT id, gmail_id, thread_id, from_email, from_name, to_email, cc_emails, subject,
                LEFT(body_text, 5000) AS body_text,
                body_html,
                LEFT(body_text, 200) AS body_preview,
