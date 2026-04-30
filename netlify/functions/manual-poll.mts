@@ -105,145 +105,152 @@ export default async function handler(req: Request) {
       }));
     }
 
-    // ── 4. Traiter chaque email nouveau en parallèle ──
-    // Exclure les emails déjà traités ET ceux dont le thread a déjà reçu une réponse
+    // ── 4. Identifier les emails à traiter ──
     const toProcess = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && sentThreadIds.has(m.threadId)));
     const skipped = messages.length - toProcess.length;
     console.log(`[manual-poll] ${toProcess.length} email(s) à traiter, ${skipped} déjà traité(s)`);
 
-    const results = await Promise.all(toProcess.map(async ({ id: gmailId, threadId }) => {
-      try {
-        // Récupérer le contenu complet
-        const msgRes = await gmail.users.messages.get({
-          userId: 'me',
-          id: gmailId!,
-          format: 'full',
-        });
+    // Aucun email à traiter
+    if (toProcess.length === 0) {
+      return jsonResponse({ success: true, processed: 0, skipped, total: messages.length, remaining: 0 });
+    }
 
-        const payload = msgRes.data.payload;
-        if (!payload) return 'skipped';
+    // ── 5. Traiter uniquement le premier email de la liste ──
+    const { id: gmailId, threadId } = toProcess[0];
+    const remaining = toProcess.length - 1; // combien restent après celui-ci
 
-        // ── Ignorer les messages envoyés (label SENT) — protection robuste ──
-        const labelIds = msgRes.data.labelIds ?? [];
-        if (labelIds.includes('SENT')) {
-          console.log(`[manual-poll] ⏭ Ignoré (label SENT) : ${gmailId}`);
-          await markAsRead(gmailId!);
-          return 'skipped';
-        }
+    let processResult: 'processed' | 'skipped' | 'error' = 'skipped';
 
-        const headers     = payload.headers ?? [];
-        const fromRaw     = getHeader(headers, 'From');
-        const toRaw       = getHeader(headers, 'To');
-        const ccRaw       = getHeader(headers, 'Cc');
-        const messageId   = getHeader(headers, 'Message-ID');
-        const subject     = getHeader(headers, 'Subject') || '(sans objet)';
-        const dateStr     = getHeader(headers, 'Date');
-        const receivedAt  = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
+    try {
+      const msgRes = await gmail.users.messages.get({
+        userId: 'me',
+        id: gmailId!,
+        format: 'full',
+      });
 
-        // Parser "Prénom Nom <email@example.com>"
-        const fromMatch = fromRaw.match(/^(.*?)\s*<(.+?)>$/) ?? [null, fromRaw, fromRaw];
-        const fromName  = (fromMatch[1] ?? '').replace(/"/g, '').trim();
-        const fromEmail = (fromMatch[2] ?? fromRaw).trim();
-
-        // ── Ignorer nos propres envois (filet de sécurité si -from:me a échoué) ──
-        if (gmailAddress && fromEmail.toLowerCase() === gmailAddress) {
-          console.log(`[manual-poll] ⏭ Ignoré (notre propre envoi) : ${subject}`);
-          await markAsRead(gmailId!);
-          return 'skipped';
-        }
-
-        const { text: bodyText, html: bodyHtml } = extractBody(payload);
-        const attachments = extractAttachments(payload);
-
-        // Si pas de texte brut, extraire le texte depuis l'HTML (emails HTML-only)
-        let effectiveBody = bodyText.trim();
-        if (effectiveBody.length < 10 && bodyHtml) {
-          effectiveBody = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        }
-
-        // Ignorer les emails vraiment vides
-        if (effectiveBody.length < 5 && subject === '(sans objet)') return 'skipped';
-
-        // ── 5. Appel Claude ──
-        const result = await classifyAndDraftEmail({
-          guide,
-          examples,
-          rules,
-          fromEmail,
-          fromName,
-          subject,
-          body: effectiveBody.slice(0, 3000),
-        });
-
-        // ── 6. Stocker en base (upsert : MAJ body_html + attachments si email pending) ──
-        try {
-          await db`
-            INSERT INTO emails (
-              gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails,
-              subject, body_text, body_html, received_at,
-              classification, reasoning, draft_response, status, attachments
-            ) VALUES (
-              ${gmailId ?? ''}, ${threadId ?? ''}, ${messageId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''}, ${ccRaw ?? ''},
-              ${subject}, ${bodyText ?? ''}, ${bodyHtml ?? ''}, ${receivedAt},
-              ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending',
-              ${JSON.stringify(attachments)}::jsonb
-            )
-            ON CONFLICT (gmail_id) DO UPDATE SET
-              body_html   = EXCLUDED.body_html,
-              attachments = EXCLUDED.attachments
-            WHERE emails.status = 'pending'
-          `;
-        } catch {
-          await db`
-            INSERT INTO emails (
-              gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails,
-              subject, body_text, body_html, received_at,
-              classification, reasoning, draft_response, status
-            ) VALUES (
-              ${gmailId ?? ''}, ${threadId ?? ''}, ${messageId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''}, ${ccRaw ?? ''},
-              ${subject}, ${bodyText ?? ''}, ${bodyHtml ?? ''}, ${receivedAt},
-              ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending'
-            )
-            ON CONFLICT (gmail_id) DO UPDATE SET
-              body_html = EXCLUDED.body_html
-            WHERE emails.status = 'pending'
-          `;
-        }
-
-        // ── 7. Alerte si URGENT ──
-        if (result.classification === 'URGENT') {
-          try {
-            const senderEmail  = process.env.GMAIL_ADDRESS ?? 'contact@coachello.io';
-            const alertAddress = process.env.URGENT_ALERT_EMAIL ?? 'gaspard@coachello.io';
-            const alertRaw     = buildRawEmail({
-              to:      alertAddress,
-              from:    senderEmail,
-              subject: '🚨 MAIL URGENT SUR LA BOITE COACH',
-              body: `Un email urgent vient d'arriver sur la boîte Coachello.\n\nDe : ${fromName ? `${fromName} ` : ''}${fromEmail}\nObjet : ${subject}\n\nAnalyse : ${result.reasoning}\n\n→ Traiter sur https://coachello-email-agent.netlify.app`,
-            });
-            await gmail.users.messages.send({
-              userId: 'me',
-              requestBody: { raw: alertRaw },
-            });
-            console.log(`[manual-poll] Alerte URGENT envoyée à ${alertAddress}`);
-          } catch (alertErr) {
-            console.error('[manual-poll] Échec envoi alerte URGENT:', alertErr);
-          }
-        }
-
-        console.log(`[manual-poll] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
-        return 'processed';
-
-      } catch (err) {
-        console.error(`[manual-poll] ✗ Erreur sur email ${gmailId}:`, err);
-        return 'error';
+      const payload = msgRes.data.payload;
+      if (!payload) {
+        return jsonResponse({ success: true, processed: 0, skipped: skipped + 1, total: messages.length, remaining });
       }
-    }));
 
-    const processed = results.filter(r => r === 'processed').length;
+      // ── Ignorer les messages envoyés (label SENT) ──
+      const labelIds = msgRes.data.labelIds ?? [];
+      if (labelIds.includes('SENT')) {
+        console.log(`[manual-poll] ⏭ Ignoré (label SENT) : ${gmailId}`);
+        await markAsRead(gmailId!);
+        return jsonResponse({ success: true, processed: 0, skipped: skipped + 1, total: messages.length, remaining });
+      }
 
-    console.log(`[manual-poll] Terminé : ${processed} traité(s), ${skipped} ignoré(s)`);
-    return jsonResponse({ success: true, processed, skipped, total: messages.length });
+      const headers    = payload.headers ?? [];
+      const fromRaw    = getHeader(headers, 'From');
+      const toRaw      = getHeader(headers, 'To');
+      const ccRaw      = getHeader(headers, 'Cc');
+      const messageId  = getHeader(headers, 'Message-ID');
+      const subject    = getHeader(headers, 'Subject') || '(sans objet)';
+      const dateStr    = getHeader(headers, 'Date');
+      const receivedAt = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
+
+      const fromMatch = fromRaw.match(/^(.*?)\s*<(.+?)>$/) ?? [null, fromRaw, fromRaw];
+      const fromName  = (fromMatch[1] ?? '').replace(/"/g, '').trim();
+      const fromEmail = (fromMatch[2] ?? fromRaw).trim();
+
+      // ── Ignorer nos propres envois ──
+      if (gmailAddress && fromEmail.toLowerCase() === gmailAddress) {
+        console.log(`[manual-poll] ⏭ Ignoré (notre propre envoi) : ${subject}`);
+        await markAsRead(gmailId!);
+        return jsonResponse({ success: true, processed: 0, skipped: skipped + 1, total: messages.length, remaining });
+      }
+
+      const { text: bodyText, html: bodyHtml } = extractBody(payload);
+      const attachments = extractAttachments(payload);
+
+      let effectiveBody = bodyText.trim();
+      if (effectiveBody.length < 10 && bodyHtml) {
+        effectiveBody = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+
+      if (effectiveBody.length < 5 && subject === '(sans objet)') {
+        return jsonResponse({ success: true, processed: 0, skipped: skipped + 1, total: messages.length, remaining });
+      }
+
+      // ── Appel Claude ──
+      const result = await classifyAndDraftEmail({
+        guide,
+        examples,
+        rules,
+        fromEmail,
+        fromName,
+        subject,
+        body: effectiveBody.slice(0, 3000),
+      });
+
+      // ── Stocker en base ──
+      try {
+        await db`
+          INSERT INTO emails (
+            gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails,
+            subject, body_text, body_html, received_at,
+            classification, reasoning, draft_response, status, attachments
+          ) VALUES (
+            ${gmailId ?? ''}, ${threadId ?? ''}, ${messageId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''}, ${ccRaw ?? ''},
+            ${subject}, ${bodyText ?? ''}, ${bodyHtml ?? ''}, ${receivedAt},
+            ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending',
+            ${JSON.stringify(attachments)}::jsonb
+          )
+          ON CONFLICT (gmail_id) DO UPDATE SET
+            body_html   = EXCLUDED.body_html,
+            attachments = EXCLUDED.attachments
+          WHERE emails.status = 'pending'
+        `;
+      } catch {
+        await db`
+          INSERT INTO emails (
+            gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails,
+            subject, body_text, body_html, received_at,
+            classification, reasoning, draft_response, status
+          ) VALUES (
+            ${gmailId ?? ''}, ${threadId ?? ''}, ${messageId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''}, ${ccRaw ?? ''},
+            ${subject}, ${bodyText ?? ''}, ${bodyHtml ?? ''}, ${receivedAt},
+            ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending'
+          )
+          ON CONFLICT (gmail_id) DO UPDATE SET
+            body_html = EXCLUDED.body_html
+          WHERE emails.status = 'pending'
+        `;
+      }
+
+      // ── Alerte si URGENT ──
+      if (result.classification === 'URGENT') {
+        try {
+          const senderEmail  = process.env.GMAIL_ADDRESS ?? 'contact@coachello.io';
+          const alertAddress = process.env.URGENT_ALERT_EMAIL ?? 'gaspard@coachello.io';
+          const alertRaw     = buildRawEmail({
+            to:      alertAddress,
+            from:    senderEmail,
+            subject: '🚨 MAIL URGENT SUR LA BOITE COACH',
+            body: `Un email urgent vient d'arriver sur la boîte Coachello.\n\nDe : ${fromName ? `${fromName} ` : ''}${fromEmail}\nObjet : ${subject}\n\nAnalyse : ${result.reasoning}\n\n→ Traiter sur https://coachello-email-agent.netlify.app`,
+          });
+          await gmail.users.messages.send({
+            userId: 'me',
+            requestBody: { raw: alertRaw },
+          });
+          console.log(`[manual-poll] Alerte URGENT envoyée à ${alertAddress}`);
+        } catch (alertErr) {
+          console.error('[manual-poll] Échec envoi alerte URGENT:', alertErr);
+        }
+      }
+
+      console.log(`[manual-poll] ✓ ${fromEmail} — ${subject} → ${result.classification} (${remaining} restant(s))`);
+      processResult = 'processed';
+
+    } catch (err) {
+      console.error(`[manual-poll] ✗ Erreur sur email ${gmailId}:`, err);
+      processResult = 'error';
+    }
+
+    const processed = processResult === 'processed' ? 1 : 0;
+    console.log(`[manual-poll] Terminé : ${processed} traité(s), ${remaining} restant(s)`);
+    return jsonResponse({ success: true, processed, skipped, total: messages.length, remaining });
 
   } catch (err) {
     console.error('[manual-poll] Erreur fatale:', err);

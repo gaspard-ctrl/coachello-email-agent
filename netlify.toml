@@ -10,8 +10,14 @@
 [functions."poll-emails"]
   schedule = "0 * * * *"
 
-# ── Timeout explicite pour les actions email (Claude API) ──
+# ── Timeout explicite pour les fonctions qui appellent Claude ──
 [functions."email-action"]
+  timeout = 26
+
+[functions."manual-poll"]
+  timeout = 26
+
+[functions."compose-email"]
   timeout = 26
 
 # ── Redirections API → Netlify Functions ──
@@ -73,6 +79,11 @@
 [[redirects]]
   from   = "/api/usage"
   to     = "/.netlify/functions/usage"
+  status = 200
+
+[[redirects]]
+  from   = "/api/settings"
+  to     = "/.netlify/functions/manage-settings"
   status = 200
 
 # ── SPA fallback (React Router) ──

@@ -126,21 +126,34 @@ export default function Dashboard() {
     setPollProgress(null)
 
     try {
-      // Sync-read d'abord (supprimer les emails lus dans Gmail)
       await syncRead()
-      // Puis polling des nouveaux emails
-      const res  = await fetch('/api/manual-poll')
-      const text = await res.text()
-      let data: any
-      try { data = JSON.parse(text) } catch { data = null }
 
-      if (!res.ok || !data?.success) {
-        setPollResult(`Erreur ${res.status}${data?.error ? ` : ${data.error}` : ''}`)
-      } else {
-        setPollResult(data.processed > 0 ? `${data.processed} email(s) traité(s)` : 'Aucun nouveau mail')
+      let totalProcessed = 0
+      let remaining = 1 // démarre à 1 pour entrer dans la boucle
+
+      while (remaining > 0) {
+        const res  = await fetch('/api/manual-poll')
+        const text = await res.text()
+        let data: any
+        try { data = JSON.parse(text) } catch { data = null }
+
+        if (!res.ok || !data?.success) {
+          setPollResult(`Erreur ${res.status}${data?.error ? ` : ${data.error}` : ''}`)
+          break
+        }
+
+        totalProcessed += data.processed ?? 0
+        remaining = data.remaining ?? 0
+
+        if (remaining > 0) {
+          setPollProgress({ done: totalProcessed, total: totalProcessed + remaining })
+          fetchEmails()
+        }
       }
+
       fetchEmails()
-    } catch (err) {
+      setPollResult(totalProcessed > 0 ? `${totalProcessed} email(s) traité(s)` : 'Aucun nouveau mail')
+    } catch {
       setPollResult(`Erreur réseau`)
     }
 
