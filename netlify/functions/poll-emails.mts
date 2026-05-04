@@ -176,7 +176,8 @@ export default async function handler(req: Request) {
               attachments = EXCLUDED.attachments
             WHERE emails.status = 'pending'
           `;
-        } catch {
+        } catch (insertErr) {
+          console.error('[poll-emails] INSERT principal échoué, tentative legacy:', insertErr);
           await db`
             INSERT INTO emails (
               gmail_id, thread_id, from_email, from_name, to_email,

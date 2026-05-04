@@ -5,12 +5,22 @@ import postgres from 'postgres';
 
 // Singleton — réutilise la même pool sur les invocations warm (évite le cold start DB à chaque requête)
 let _db: ReturnType<typeof postgres> | null = null;
+let _migrated = false;
 
 export function getDb() {
   if (!_db) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL manquant dans les variables d\'environnement');
     _db = postgres(url, { ssl: 'require', max: 2, connect_timeout: 10, idle_timeout: 60 });
+  }
+  if (!_migrated) {
+    _migrated = true;
+    // Auto-migration idempotente : ajoute les colonnes ajoutées après le schema initial.
+    // Tourne une fois par cold start, en arrière-plan, sans bloquer l'appel courant.
+    void Promise.all([
+      _db`ALTER TABLE emails ADD COLUMN IF NOT EXISTS message_id VARCHAR(500)`,
+      _db`ALTER TABLE emails ADD COLUMN IF NOT EXISTS cc_emails  TEXT`,
+    ]).catch(err => console.error('[_db] auto-migration:', err));
   }
   return _db;
 }

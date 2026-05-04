@@ -184,7 +184,7 @@ export default async function handler(req: Request) {
         body: effectiveBody.slice(0, 3000),
       });
 
-      // ── Stocker en base ──
+      // ── Stocker en base (fallback progressif si colonnes manquantes) ──
       try {
         await db`
           INSERT INTO emails (
@@ -202,14 +202,15 @@ export default async function handler(req: Request) {
             attachments = EXCLUDED.attachments
           WHERE emails.status = 'pending'
         `;
-      } catch {
+      } catch (insertErr) {
+        console.error('[manual-poll] INSERT principal échoué, tentative legacy:', insertErr);
         await db`
           INSERT INTO emails (
-            gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails,
+            gmail_id, thread_id, from_email, from_name, to_email,
             subject, body_text, body_html, received_at,
             classification, reasoning, draft_response, status
           ) VALUES (
-            ${gmailId ?? ''}, ${threadId ?? ''}, ${messageId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''}, ${ccRaw ?? ''},
+            ${gmailId ?? ''}, ${threadId ?? ''}, ${fromEmail}, ${fromName}, ${toRaw ?? ''},
             ${subject}, ${bodyText ?? ''}, ${bodyHtml ?? ''}, ${receivedAt},
             ${result.classification}, ${result.reasoning}, ${result.draft_response}, 'pending'
           )
