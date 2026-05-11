@@ -20,8 +20,7 @@
 [functions."compose-email"]
   timeout = 26
 
-[functions."analyze-email"]
-  timeout = 26
+# analyze-email est un endpoint DB-only (déclenche la BG) — pas besoin de timeout étendu
 
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
