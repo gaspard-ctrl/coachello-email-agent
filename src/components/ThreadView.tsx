@@ -53,10 +53,17 @@ function formatDate(raw: string): string {
   })
 }
 
+function isForwardedSubject(subject: string): boolean {
+  return /^\s*(Fwd?|FW|TR|Tr)\s*:/i.test(subject ?? '')
+}
+
 // Retire la portion citée ("On X wrote: ..." / blockquote / -----Original-----)
 // puisque le thread complet est déjà affiché message par message en dessous.
-function stripQuotedHtml(html: string): string {
+// Pour les emails forwardés (subject Fwd:/Fw:/TR:), on garde tout — le contenu
+// "transféré" EST le message que l'utilisateur veut voir.
+function stripQuotedHtml(html: string, isForward = false): string {
   if (!html || typeof window === 'undefined') return html
+  if (isForward) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
 
   doc.querySelectorAll('.gmail_quote, blockquote, .gmail_attr').forEach(n => n.remove())
@@ -77,8 +84,9 @@ function stripQuotedHtml(html: string): string {
   return doc.body.innerHTML
 }
 
-function stripQuotedText(text: string): string {
+function stripQuotedText(text: string, isForward = false): string {
   if (!text) return text
+  if (isForward) return text
   return text
     .replace(/\n?On .{5,200} wrote:\s*\n[\s\S]*$/i, '')
     .replace(/\n?Le .{5,200} a écrit\s*:\s*\n[\s\S]*$/i, '')
@@ -101,15 +109,16 @@ function MessageBlock({ msg, initiallyOpen, onPreview }: { msg: ThreadMessage; i
   const [open, setOpen] = useState(initiallyOpen)
   const [showDetails, setShowDetails] = useState(false)
   const { name, email } = parseAddress(msg.from)
+  const isForward = isForwardedSubject(msg.subject)
   const sanitizedHtml = msg.body_html
-    ? DOMPurify.sanitize(stripQuotedHtml(msg.body_html), {
+    ? DOMPurify.sanitize(stripQuotedHtml(msg.body_html, isForward), {
         FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
         FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover'],
         ADD_ATTR: ['target', 'src', 'alt', 'width', 'height', 'style'],
         ALLOW_DATA_ATTR: true,
       })
     : ''
-  const bodyText = stripQuotedText(msg.body_text)
+  const bodyText = stripQuotedText(msg.body_text, isForward)
 
   return (
     <div className="border-b border-[#F0EDE8] last:border-b-0">
