@@ -37,6 +37,27 @@ export interface Email {
   attachments?: EmailAttachment[];
 }
 
+export interface GmailEmail {
+  gmail_id: string;
+  thread_id: string;
+  folder: 'inbox' | 'sent' | 'drafts';
+  from_email: string;
+  from_name: string;
+  to_email: string;
+  to_name: string;
+  subject: string;
+  snippet: string;
+  received_at: string;
+  is_unread: boolean;
+  is_starred: boolean;
+  is_analyzed: boolean;
+  classification?: Classification;
+  email_db_id?: string;
+  status?: EmailStatus;
+  /** Nombre de messages dans le thread (présent uniquement pour les lignes regroupées par thread). */
+  thread_count?: number;
+}
+
 export interface Stats {
   classification: Classification;
   status: EmailStatus;

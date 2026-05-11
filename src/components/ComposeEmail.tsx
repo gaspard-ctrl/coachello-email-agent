@@ -3,6 +3,10 @@ import { useState, useRef } from 'react'
 interface Props {
   onClose: () => void
   onSent: () => void
+  initialTo?: string[]
+  initialCc?: string[]
+  initialSubject?: string
+  initialBody?: string
 }
 
 function EmailTagInput({ emails, setEmails, placeholder }: {
@@ -67,11 +71,11 @@ function EmailTagInput({ emails, setEmails, placeholder }: {
   )
 }
 
-export default function ComposeEmail({ onClose, onSent }: Props) {
-  const [toEmails, setToEmails]   = useState<string[]>([])
-  const [ccEmails, setCcEmails]   = useState<string[]>([])
-  const [subject, setSubject]     = useState('')
-  const [body, setBody]           = useState('')
+export default function ComposeEmail({ onClose, onSent, initialTo, initialCc, initialSubject, initialBody }: Props) {
+  const [toEmails, setToEmails]   = useState<string[]>(initialTo ?? [])
+  const [ccEmails, setCcEmails]   = useState<string[]>(initialCc ?? [])
+  const [subject, setSubject]     = useState(initialSubject ?? '')
+  const [body, setBody]           = useState(initialBody ?? '')
   const [instructions, setInstructions] = useState('')
   const [showInstructions, setShowInstructions] = useState(false)
   const [loading, setLoading]     = useState(false)

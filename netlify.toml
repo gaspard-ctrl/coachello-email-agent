@@ -6,8 +6,8 @@
   directory      = "netlify/functions"
   node_bundler   = "esbuild"
 
-# ── Scheduled Function — toutes les heures ──
-[functions."poll-emails"]
+# ── Scheduled Background Function — toutes les heures, 15 min de timeout ──
+[functions."poll-emails-background"]
   schedule = "0 * * * *"
 
 # ── Timeout explicite pour les fonctions qui appellent Claude ──
@@ -20,10 +20,33 @@
 [functions."compose-email"]
   timeout = 26
 
+[functions."analyze-email"]
+  timeout = 26
+
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
   from   = "/api/manual-poll"
   to     = "/.netlify/functions/manual-poll"
+  status = 200
+
+[[redirects]]
+  from   = "/api/gmail-inbox"
+  to     = "/.netlify/functions/gmail-inbox"
+  status = 200
+
+[[redirects]]
+  from   = "/api/analyze-email"
+  to     = "/.netlify/functions/analyze-email"
+  status = 200
+
+[[redirects]]
+  from   = "/api/mark-read"
+  to     = "/.netlify/functions/mark-read"
+  status = 200
+
+[[redirects]]
+  from   = "/api/gmail-thread"
+  to     = "/.netlify/functions/gmail-thread"
   status = 200
 
 [[redirects]]

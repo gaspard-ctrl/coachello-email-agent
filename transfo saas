@@ -1,0 +1,125 @@
+Tu vas transformer ce projet (un agent email interne Coachello) en un produit SaaS générique 
+d'assistant email IA. Le projet actuel est une app React + Netlify Functions + Supabase + 
+Gmail API + Claude API. L'objectif est de créer un produit multi-tenant où chaque utilisateur 
+connecte sa boîte mail et reçoit des suggestions de réponses IA.
+
+=== ARCHITECTURE CIBLE ===
+
+1. MULTI-TENANCY & AUTH
+- Remplacer le système password simple par Supabase Auth (Google OAuth + Magic Link)
+- Chaque utilisateur a son propre espace (tenant isolé)
+- Table `users` avec : id, email, name, plan (free/pro/enterprise), gmail_refresh_token, 
+  onboarding_completed, created_at
+- Row Level Security (RLS) sur toutes les tables Supabase pour isoler les données par user
+- Stocker le Gmail refresh token chiffré par utilisateur (chaque user connecte SA boîte Gmail)
+
+2. ONBOARDING FLOW
+- Après signup : page d'onboarding en 3 étapes :
+  a) Connecter son compte Gmail (OAuth consent screen personnalisé)
+  b) Définir son "guide de réponse" (ton, style, infos sur son entreprise — textarea ou upload .docx)
+  c) Choisir ses catégories de priorité (personnalisables, pas hardcodées Coachello)
+- Le guide de réponse et les catégories sont stockés par user
+
+3. SCHEMA DB (migration depuis le schéma actuel)
+- `users` : id (uuid), email, name, avatar_url, plan, gmail_tokens (encrypted jsonb), 
+  settings (jsonb), created_at
+- `emails` : ajouter colonne `user_id` (FK → users), garder le reste du schéma
+- `guides` : renommer `guide` → `guides`, ajouter `user_id`
+- `examples` : ajouter `user_id`
+- `classification_rules` : ajouter `user_id`
+- `categories` : nouvelle table — id, user_id, name, color, priority_order, description, created_at
+  (remplace le CLASSIFICATION_CONFIG hardcodé)
+- Ajouter RLS policies sur toutes les tables
+
+4. SUPPRESSION DE TOUT CE QUI EST COACHELLO
+- Supprimer le fichier guide-reponse-email-coachello.txt
+- Supprimer toutes les références à Coachello dans le code (logos, textes, prompts Claude)
+- Remplacer par un branding neutre/configurable : nom du produit = "MailPilot" (ou autre nom à choisir)
+- Le prompt Claude doit être générique : "Tu es un assistant email IA qui aide {user.name} à 
+  répondre à ses emails selon son guide de réponse personnalisé"
+- Les catégories de classification doivent venir de la DB (table `categories` du user), 
+  pas d'un config hardcodé
+
+5. FRONTEND - NOUVELLES PAGES
+Structure de routing (React Router) :
+- `/` → Landing page (page marketing simple)
+- `/login` → Page de connexion (Supabase Auth UI)
+- `/signup` → Page d'inscription
+- `/onboarding` → Flow d'onboarding (3 étapes)
+- `/dashboard` → Le kanban actuel (protégé par auth)
+- `/settings` → Page settings avec onglets :
+  - Profil (nom, email, avatar)
+  - Guide de réponse (éditer son guide)
+  - Catégories (CRUD sur ses catégories de classification)
+  - Exemples (la lib d'exemples actuelle)
+  - Règles (les rules de classification)
+  - Connexion Gmail (status, reconnecter)
+  - Abonnement (plan actuel, upgrade)
+
+6. LANDING PAGE (simple mais efficace)
+- Hero section : titre accrocheur + sous-titre + CTA "Commencer gratuitement"
+- 3 features cards : "Analyse IA", "Réponses suggérées", "Classification automatique"
+- Section "Comment ça marche" en 3 étapes
+- Pricing section (Free: 50 emails/mois, Pro: illimité à 19€/mois)
+- Footer avec liens
+- Design moderne avec Tailwind, palette sobre (pas le rose Coachello)
+
+7. SYSTÈME DE BILLING
+- Intégrer Stripe Checkout pour les plans payants
+- Free plan : 50 emails analysés/mois
+- Pro plan : emails illimités, fonctionnalités avancées
+- Webhook Stripe → mettre à jour le plan dans la table `users`
+- Compteur d'usage par mois dans une table `usage` (user_id, month, email_count)
+
+8. POLLING GMAIL PAR USER
+- Le polling ne doit plus être global mais par utilisateur
+- Chaque user a ses propres credentials Gmail
+- Background function qui itère sur les users actifs et poll leurs emails
+- Rate limiting : respecter les quotas Gmail API par user
+- Scheduled function (Netlify ou cron) qui poll tous les users actifs toutes les 15-30 min
+
+9. AMÉLIORATIONS TECHNIQUES
+- Migrer vers @supabase/supabase-js pour le client DB (au lieu de postgres.js direct) 
+  pour bénéficier du RLS automatique
+- Ajouter des notifications in-app (toast) pour les nouveaux emails
+- Ajouter un système de recherche/filtre dans le dashboard
+- Dark mode toggle
+- Responsive design (mobile-friendly)
+- Ajouter des analytics basiques (emails traités, taux de validation, temps de réponse moyen)
+
+10. SÉCURITÉ
+- Chiffrer les tokens Gmail au repos (encryption at rest)
+- API endpoints protégés par JWT Supabase
+- CORS restreint au domaine de prod
+- Rate limiting sur les endpoints publics
+- Sanitization des inputs utilisateur
+
+=== ORDRE D'IMPLÉMENTATION ===
+
+Phase 1 : Fondations
+- [ ] Setup Supabase Auth + nouveau schéma DB avec RLS
+- [ ] Supprimer tout le branding Coachello
+- [ ] Implémenter le routing React Router
+- [ ] Page login/signup avec Supabase Auth
+- [ ] Adapter toutes les Netlify Functions pour le multi-tenant (user_id depuis le JWT)
+
+Phase 2 : Core Product
+- [ ] Flow d'onboarding (connexion Gmail + guide + catégories)
+- [ ] Adapter le dashboard kanban pour les catégories dynamiques
+- [ ] Adapter le polling Gmail par user
+- [ ] Adapter le prompt Claude pour être générique + utiliser le guide/catégories du user
+- [ ] Page Settings complète
+
+Phase 3 : Growth
+- [ ] Landing page
+- [ ] Intégration Stripe (plans + limites)
+- [ ] Dark mode
+- [ ] Analytics dashboard basique
+- [ ] Responsive mobile
+
+=== CONTRAINTES ===
+- Garder le stack actuel (React + Vite + Tailwind + Netlify Functions + Supabase)
+- Ne PAS changer de provider d'IA (rester sur Anthropic Claude)
+- Le code doit rester déployable sur Netlify
+- TypeScript strict partout
+- Composants réutilisables et bien structurés

@@ -35,20 +35,49 @@ export default async function handler(req: Request) {
   const db = getDb();
 
   try {
-    // ── Récupérer l'email ──
-    const rows = await db`SELECT * FROM emails WHERE id = ${emailId}`;
-    if ((rows as any[]).length === 0) return errorResponse('Email introuvable', 404);
-    const email = (rows as any[])[0];
-
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
-    const { user = 'team', final_response, attachments: reqAttachments } = body as {
+    const {
+      user = 'team', final_response, attachments: reqAttachments,
+      gmail_id: bodyGmailId, thread_id: bodyThreadId,
+      from_email: bodyFromEmail, to_email: bodyToEmail,
+      cc_emails: bodyCcEmails, subject: bodySubject,
+    } = body as {
       user?: string; final_response?: string; attachments?: OutgoingAttachment[];
+      gmail_id?: string; thread_id?: string;
+      from_email?: string; to_email?: string;
+      cc_emails?: string; subject?: string;
     };
+
+    // ── Récupérer l'email ──
+    // Cas 1 : email tmp-* (non analysé, pas de row DB) → construire depuis le body
+    // Cas 2 : email analysé → row DB
+    const isTmp = emailId.startsWith('tmp-');
+    let email: any;
+    if (isTmp) {
+      if (!bodyGmailId) return errorResponse('gmail_id requis pour les emails non analysés', 400);
+      email = {
+        id: emailId,
+        gmail_id:    bodyGmailId,
+        thread_id:   bodyThreadId ?? null,
+        from_email:  bodyFromEmail ?? '',
+        to_email:    bodyToEmail ?? '',
+        cc_emails:   bodyCcEmails ?? null,
+        subject:     bodySubject ?? '(sans objet)',
+        message_id:  null,
+        draft_response: null,
+        status:      'pending',
+      };
+    } else {
+      const rows = await db`SELECT * FROM emails WHERE id = ${emailId}`;
+      if ((rows as any[]).length === 0) return errorResponse('Email introuvable', 404);
+      email = (rows as any[])[0];
+    }
 
     // ──────────────────────────────────────────────────
     // ACTION : lock (un membre de l'équipe ouvre l'email)
     // ──────────────────────────────────────────────────
     if (action === 'lock') {
+      if (isTmp) return jsonResponse({ success: true, action: 'locked', skipped: true });
       if (email.status === 'locked' && email.locked_by !== user) {
         return jsonResponse({ locked: true, locked_by: email.locked_by }, 409);
       }
@@ -64,6 +93,7 @@ export default async function handler(req: Request) {
     // ACTION : unlock
     // ──────────────────────────────────────────────────
     if (action === 'unlock') {
+      if (isTmp) return jsonResponse({ success: true, action: 'unlocked', skipped: true });
       await db`
         UPDATE emails
         SET status = 'pending', locked_by = NULL, locked_at = NULL
@@ -78,10 +108,12 @@ export default async function handler(req: Request) {
     if (action === 'reject') {
       const gmailOk = email.gmail_id ? await markAsRead(email.gmail_id) : true;
 
-      if (gmailOk) {
-        await db`DELETE FROM emails WHERE id = ${emailId}`;
-      } else {
-        await db`UPDATE emails SET status = 'rejected', validated_by = ${user}, validated_at = NOW() WHERE id = ${emailId}`;
+      if (!isTmp) {
+        if (gmailOk) {
+          await db`DELETE FROM emails WHERE id = ${emailId}`;
+        } else {
+          await db`UPDATE emails SET status = 'rejected', validated_by = ${user}, validated_at = NOW() WHERE id = ${emailId}`;
+        }
       }
       return jsonResponse({ success: true, action: 'rejected' });
     }
@@ -110,10 +142,12 @@ export default async function handler(req: Request) {
         gmailOk = true;
       }
 
-      if (gmailOk) {
-        await db`DELETE FROM emails WHERE id = ${emailId}`;
-      } else {
-        await db`UPDATE emails SET status = 'rejected', validated_by = ${user}, validated_at = NOW() WHERE id = ${emailId}`;
+      if (!isTmp) {
+        if (gmailOk) {
+          await db`DELETE FROM emails WHERE id = ${emailId}`;
+        } else {
+          await db`UPDATE emails SET status = 'rejected', validated_by = ${user}, validated_at = NOW() WHERE id = ${emailId}`;
+        }
       }
       return jsonResponse({ success: true, action: 'reported' });
     }
@@ -171,15 +205,17 @@ export default async function handler(req: Request) {
       const gmailOk = await markAsRead(email.gmail_id);
 
       // Si Gmail OK → supprimer de la DB. Sinon garder avec status='sent' pour ne pas réingérer.
-      if (gmailOk) {
-        await db`DELETE FROM emails WHERE id = ${emailId}`;
-      } else {
-        await db`
-          UPDATE emails
-          SET status = 'sent', validated_by = ${user}, validated_at = NOW(),
-              final_response = ${responseText}
-          WHERE id = ${emailId}
-        `;
+      if (!isTmp) {
+        if (gmailOk) {
+          await db`DELETE FROM emails WHERE id = ${emailId}`;
+        } else {
+          await db`
+            UPDATE emails
+            SET status = 'sent', validated_by = ${user}, validated_at = NOW(),
+                final_response = ${responseText}
+            WHERE id = ${emailId}
+          `;
+        }
       }
 
       return jsonResponse({ success: true, action: 'sent' });
@@ -231,15 +267,17 @@ export default async function handler(req: Request) {
       // Marquer comme lu dans Gmail d'abord
       const gmailOk = await markAsRead(email.gmail_id);
 
-      if (gmailOk) {
-        await db`DELETE FROM emails WHERE id = ${emailId}`;
-      } else {
-        await db`
-          UPDATE emails
-          SET status = 'draft_saved', validated_by = ${user}, validated_at = NOW(),
-              final_response = ${responseText}
-          WHERE id = ${emailId}
-        `;
+      if (!isTmp) {
+        if (gmailOk) {
+          await db`DELETE FROM emails WHERE id = ${emailId}`;
+        } else {
+          await db`
+            UPDATE emails
+            SET status = 'draft_saved', validated_by = ${user}, validated_at = NOW(),
+                final_response = ${responseText}
+            WHERE id = ${emailId}
+          `;
+        }
       }
       return jsonResponse({ success: true, action: 'draft_saved' });
     }

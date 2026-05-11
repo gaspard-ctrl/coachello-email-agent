@@ -59,17 +59,17 @@ export default function App() {
     <div className="min-h-screen bg-[#F5F0EA]">
       {/* ── Header ── */}
       <header className="bg-[#F5F0EA] border-b border-[#E8E2D9] sticky top-0 z-40">
-        <div className="px-6 h-[60px] flex items-center justify-between">
+        <div className="px-6 h-[42px] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo-coachello.png" alt="Coachello" className="h-6" />
-            <span className="text-[#D8D0C5] select-none">|</span>
-            <span className="text-xs text-[#aaa] font-semibold uppercase tracking-widest">Agent Email</span>
+            <img src="/logo-coachello.png" alt="Coachello" className="h-5" />
+            <span className="text-[#D8D0C5] select-none text-xs">|</span>
+            <span className="text-[10px] text-[#aaa] font-semibold uppercase tracking-widest">Agent Email</span>
           </div>
 
-          <nav className="flex items-center gap-1 bg-[#EDE8E0] rounded-full p-1">
+          <nav className="flex items-center gap-1 bg-[#EDE8E0] rounded-full p-0.5">
             <button
               onClick={() => setView('dashboard')}
-              className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+              className={`px-3 py-1 rounded-full text-[12px] font-semibold transition-colors ${
                 view === 'dashboard'
                   ? 'bg-white text-[#1a1a1a] shadow-sm'
                   : 'text-[#999] hover:text-[#555]'
@@ -79,7 +79,7 @@ export default function App() {
             </button>
             <button
               onClick={() => setView('admin')}
-              className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+              className={`px-3 py-1 rounded-full text-[12px] font-semibold transition-colors ${
                 view === 'admin'
                   ? 'bg-white text-[#1a1a1a] shadow-sm'
                   : 'text-[#999] hover:text-[#555]'
@@ -93,7 +93,7 @@ export default function App() {
 
       {/* ── Contenu ── */}
       <main className={view === 'dashboard'
-        ? 'px-6 py-5'
+        ? 'px-3 py-3'
         : 'max-w-5xl mx-auto px-6 py-6'
       }>
         {view === 'dashboard' ? <Dashboard /> : <AdminPanel />}
