@@ -357,6 +357,38 @@ export default function Dashboard() {
     }
   }
 
+  const [trashingFaible, setTrashingFaible] = useState(false)
+  const handleTrashFaible = async () => {
+    const n = counts.FAIBLE
+    if (n === 0 || trashingFaible) return
+    if (!window.confirm(`Déplacer ${n} email${n > 1 ? 's' : ''} "Faible" dans la corbeille Gmail ?\n\nCette action retire les messages de l'inbox et les supprime de la DB locale. Récupérables depuis la corbeille Gmail pendant 30 j.`)) {
+      return
+    }
+    setTrashingFaible(true)
+    // Retirer optimistement de la liste
+    const targetGmailIds = new Set(enrichedInbox.filter(e => e.is_analyzed && e.classification === 'FAIBLE').map(e => e.gmail_id))
+    setGmailEmails(prev => prev.filter(e => !targetGmailIds.has(e.gmail_id)))
+    setAnalyzedEmails(prev => {
+      const next = prev.filter(e => !(e.classification === 'FAIBLE'))
+      inboxCache.analyzedEmails = next
+      return next
+    })
+    try {
+      const res = await apiPost<{ success: boolean; deleted?: number; failed?: number }>(
+        '/bulk-action',
+        { action: 'trash', classification: 'FAIBLE' },
+      )
+      setPollResult(`${res.deleted ?? 0} email(s) Faible supprimé(s)${res.failed ? ` (${res.failed} échec(s))` : ''}`)
+      setTimeout(() => setPollResult(null), 4000)
+    } catch (err) {
+      setPollResult(`Erreur suppression : ${err instanceof Error ? err.message : 'inconnue'}`)
+      setTimeout(() => setPollResult(null), 4000)
+      // Re-fetch pour revert l'optimiste si échec
+      refreshAll()
+    }
+    setTrashingFaible(false)
+  }
+
   const handlePoll = async () => {
     setPolling(true)
     setPollResult(null)
@@ -525,6 +557,28 @@ export default function Dashboard() {
               </span>
             ) : 'Lancer le polling'}
           </button>
+          {counts.FAIBLE > 0 && (
+            <button
+              onClick={handleTrashFaible}
+              disabled={trashingFaible}
+              className="w-full px-3 py-2 rounded-xl font-medium text-[#888] border border-[#D8D0C5] hover:text-[#C23B2A] hover:border-[#C23B2A] hover:bg-[#FEE9E5] transition-colors disabled:opacity-40 text-[12px] flex items-center justify-center gap-1.5"
+              title="Déplacer tous les emails Faible dans la corbeille Gmail"
+            >
+              {trashingFaible ? (
+                <>
+                  <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                  Suppression...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Supprimer Faible ({counts.FAIBLE})
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {(polling && pollProgress) && (
