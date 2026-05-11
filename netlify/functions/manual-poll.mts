@@ -4,7 +4,7 @@
 // ============================================================
 import type { Config } from '@netlify/functions';
 import { getDb, corsHeaders, jsonResponse } from './_db.js';
-import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead } from './_gmail.js';
+import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead, getThreadHistory } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export default async function handler(req: Request) {
@@ -186,6 +186,9 @@ export default async function handler(req: Request) {
         return jsonResponse({ success: true, processed: 0, skipped: skipped + 1, total: messages.length, remaining });
       }
 
+      // ── Historique du thread (pour éviter de re-classer URGENT une simple relance) ──
+      const threadHistory = await getThreadHistory(threadId ?? '', gmailId!, gmailAddress);
+
       // ── Appel Claude ──
       const result = await classifyAndDraftEmail({
         guide,
@@ -194,7 +197,8 @@ export default async function handler(req: Request) {
         fromEmail,
         fromName,
         subject,
-        body: effectiveBody.slice(0, 3000),
+        body: effectiveBody,
+        threadHistory,
       });
 
       // ── Stocker en base (fallback progressif si colonnes manquantes) ──

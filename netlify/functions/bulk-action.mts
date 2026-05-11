@@ -25,7 +25,7 @@ export default async function handler(req: Request) {
 
   // Récupérer tous les emails de cette classification (pending ou locked)
   const rows = await db`
-    SELECT id, gmail_id FROM emails
+    SELECT id, gmail_id, thread_id FROM emails
     WHERE classification = ${classification}
       AND status IN ('pending', 'locked')
   `;
@@ -34,35 +34,48 @@ export default async function handler(req: Request) {
     return jsonResponse({ success: true, updated: 0 });
   }
 
-  const gmailIds = (rows as any[]).map((r: any) => r.gmail_id).filter(Boolean);
-
   if (action === 'trash') {
-    // Déplacer dans la corbeille Gmail + supprimer de la DB
+    // Déplacer le thread entier dans la corbeille + supprimer de la DB
     const gmail = getGmailClient();
-    const results = await Promise.allSettled(
-      gmailIds.map((gmailId: string) =>
-        gmail.users.messages.trash({ userId: 'me', id: gmailId })
+    const threadIds = Array.from(new Set(
+      (rows as any[]).map((r: any) => r.thread_id).filter(Boolean) as string[]
+    ));
+    const trashResults = await Promise.allSettled(
+      threadIds.map((tid: string) =>
+        gmail.users.threads.trash({ userId: 'me', id: tid })
       )
     );
-    const succeeded = new Set(gmailIds.filter((_, i) => results[i].status === 'fulfilled'));
+    const succeededThreadIds = new Set(
+      threadIds.filter((_, i) => trashResults[i].status === 'fulfilled')
+    );
     const idsToDelete = (rows as any[])
-      .filter((r: any) => !r.gmail_id || succeeded.has(r.gmail_id))
+      .filter((r: any) => !r.thread_id || succeededThreadIds.has(r.thread_id))
       .map((r: any) => r.id);
     if (idsToDelete.length > 0) {
       await db`DELETE FROM emails WHERE id = ANY(${idsToDelete}::uuid[])`;
     }
-    return jsonResponse({ success: true, deleted: idsToDelete.length, failed: gmailIds.length - succeeded.size });
+    return jsonResponse({ success: true, deleted: idsToDelete.length, failed: threadIds.length - succeededThreadIds.size });
   }
 
-  // action === 'mark-read'
+  // action === 'mark-read' — on opère sur les threads (comme Gmail)
+  const threadIds = Array.from(new Set(
+    (rows as any[]).map((r: any) => r.thread_id).filter(Boolean) as string[]
+  ));
   const results = await Promise.allSettled(
-    gmailIds.map((gmailId: string) => markAsRead(gmailId))
+    threadIds.map((tid: string) => markAsRead(tid))
   );
-  const succeededGmailIds = new Set(
-    gmailIds.filter((_, i) => results[i].status === 'fulfilled' && (results[i] as PromiseFulfilledResult<boolean>).value === true)
+  const succeededThreadIds = new Set(
+    threadIds.filter((_, i) =>
+      results[i].status === 'fulfilled'
+      && (results[i] as PromiseFulfilledResult<boolean>).value === true
+    )
   );
-  const idsToDelete = (rows as any[]).filter((r: any) => !r.gmail_id || succeededGmailIds.has(r.gmail_id)).map((r: any) => r.id);
-  const idsToKeep   = (rows as any[]).filter((r: any) => r.gmail_id && !succeededGmailIds.has(r.gmail_id)).map((r: any) => r.id);
+  const idsToDelete = (rows as any[])
+    .filter((r: any) => !r.thread_id || succeededThreadIds.has(r.thread_id))
+    .map((r: any) => r.id);
+  const idsToKeep = (rows as any[])
+    .filter((r: any) => r.thread_id && !succeededThreadIds.has(r.thread_id))
+    .map((r: any) => r.id);
 
   if (idsToDelete.length > 0) {
     await db`DELETE FROM emails WHERE id = ANY(${idsToDelete}::uuid[])`;

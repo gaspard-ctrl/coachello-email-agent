@@ -16,20 +16,20 @@ export function getGmailClient() {
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
-// Marquer un message comme lu dans Gmail — avec log explicite en cas d'échec
-export async function markAsRead(gmailId: string): Promise<boolean> {
+// Marquer un thread entier comme lu dans Gmail (comme Gmail : on raisonne au niveau thread)
+export async function markAsRead(threadId: string): Promise<boolean> {
   try {
     const gmail = getGmailClient();
-    await gmail.users.messages.modify({
+    await gmail.users.threads.modify({
       userId: 'me',
-      id: gmailId,
+      id: threadId,
       requestBody: { removeLabelIds: ['UNREAD'] },
     });
     return true;
   } catch (err: any) {
     const status = err?.response?.status ?? err?.code ?? 'unknown';
     const message = err?.response?.data?.error?.message ?? err?.message ?? '';
-    console.error(`[gmail] ✗ Échec markAsRead(${gmailId}) — HTTP ${status}: ${message}`);
+    console.error(`[gmail] ✗ Échec markAsRead(${threadId}) — HTTP ${status}: ${message}`);
     if (status === 403) {
       console.error('[gmail] ⚠ Le scope OAuth "gmail.modify" est probablement manquant. Scopes actuels insuffisants pour modifier les labels.');
     }
@@ -134,6 +134,57 @@ export async function resolveInlineImages(
 // Extraire la valeur d'un header Gmail
 export function getHeader(headers: any[], name: string): string {
   return headers?.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
+}
+
+// Récupérer l'historique condensé d'un thread Gmail : tous les messages précédant
+// `currentGmailId` (exclu), du plus ancien au plus récent. Renvoie [] si le thread
+// ne contient qu'un seul message (cas le plus fréquent). Utilisé pour donner le
+// contexte conversationnel à Claude lors de la classification.
+export interface ThreadHistoryMessage {
+  from: string;       // "Prénom Nom <email>"
+  date: string;       // header Date brut
+  isOwn: boolean;     // true si envoyé depuis notre boîte (label SENT)
+  body: string;       // texte brut, déjà nettoyé
+}
+
+export async function getThreadHistory(
+  threadId: string,
+  currentGmailId: string,
+  ownAddress?: string,
+): Promise<ThreadHistoryMessage[]> {
+  if (!threadId) return [];
+  try {
+    const gmail = getGmailClient();
+    const res = await gmail.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
+    const messages = res.data.messages ?? [];
+    if (messages.length <= 1) return [];
+
+    const own = (ownAddress ?? '').toLowerCase();
+    const history: ThreadHistoryMessage[] = [];
+    for (const msg of messages) {
+      if (msg.id === currentGmailId) continue;
+      const headers = msg.payload?.headers ?? [];
+      const from = getHeader(headers, 'From');
+      const date = getHeader(headers, 'Date');
+      const fromEmail = (from.match(/<(.+?)>/)?.[1] ?? from).toLowerCase();
+      const labelIds = msg.labelIds ?? [];
+      const isOwn = labelIds.includes('SENT') || (!!own && fromEmail === own);
+
+      const { text, html } = extractBody(msg.payload);
+      let body = text.trim();
+      if (body.length < 10 && html) {
+        body = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+      // Tronquer pour limiter les tokens : on garde l'essentiel (premiers 800 char)
+      if (body.length > 800) body = body.slice(0, 800) + '…';
+
+      history.push({ from, date, isOwn, body });
+    }
+    return history;
+  } catch (err) {
+    console.error(`[gmail] ✗ getThreadHistory(${threadId}) échoué:`, err);
+    return [];
+  }
 }
 
 // Extraire les pièces jointes d'un message Gmail (inclut images inline avec contentId)

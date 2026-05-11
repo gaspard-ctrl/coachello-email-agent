@@ -29,7 +29,7 @@ class ModalErrorBoundary extends Component<
   }
 }
 
-type Filter = 'all' | 'unread' | Classification | 'unanalyzed'
+type Filter = 'all' | 'unread' | Classification | 'unanalyzed' | 'sent'
 
 const FILTERS: { key: Filter; label: string; dot?: string }[] = [
   { key: 'all',         label: 'Tous' },
@@ -39,12 +39,14 @@ const FILTERS: { key: Filter; label: string; dot?: string }[] = [
   { key: 'NORMAL',      label: 'Normal',    dot: 'bg-[#FBBED7]' },
   { key: 'FAIBLE',      label: 'Faible',    dot: 'bg-[#FDE8F2] border border-[#C8A0BE]' },
   { key: 'unanalyzed',  label: 'Non analysé', dot: 'bg-[#EDE8E0] border border-[#D8D0C5]' },
+  { key: 'sent',        label: 'Envoyés',   dot: 'bg-[#D8E0D5] border border-[#9BB59F]' },
 ]
 
 export default function Dashboard() {
   // Inbox Gmail (toutes les lignes — analysées ou non)
   const [gmailEmails, setGmailEmails] = useState<GmailEmail[]>(inboxCache.gmailEmails ?? [])
   const [analyzedEmails, setAnalyzedEmails] = useState<Email[]>(inboxCache.analyzedEmails ?? [])
+  const [sentEmails, setSentEmails] = useState<GmailEmail[]>(inboxCache.sentEmails ?? [])
   const [nextPageToken, setNextPageToken] = useState<string | null>(inboxCache.nextPageToken ?? null)
 
   const [filter, setFilter] = useState<Filter>('all')
@@ -95,6 +97,17 @@ export default function Dashboard() {
     }
   }, [])
 
+  const fetchSent = useCallback(async () => {
+    try {
+      const data = await apiGet<{ emails: GmailEmail[] }>('/gmail-inbox?folder=sent&limit=50')
+      const emails = data.emails ?? []
+      setSentEmails(emails)
+      inboxCache.sentEmails = emails
+    } catch (err) {
+      console.error('Erreur fetchSent:', err)
+    }
+  }, [])
+
   const fetchCounts = useCallback(async () => {
     try {
       const [c, d] = await Promise.all([
@@ -112,9 +125,9 @@ export default function Dashboard() {
 
   const refreshAll = useCallback(async () => {
     await syncRead()
-    await Promise.all([fetchInbox(), fetchAnalyzed()])
+    await Promise.all([fetchInbox(), fetchAnalyzed(), fetchSent()])
     fetchCounts()
-  }, [fetchInbox, fetchAnalyzed, fetchCounts, syncRead])
+  }, [fetchInbox, fetchAnalyzed, fetchSent, fetchCounts, syncRead])
 
   // Au mount : si rien en cache, fetch ; sinon refresh en arrière-plan
   useEffect(() => {
@@ -158,7 +171,7 @@ export default function Dashboard() {
     // Tous les compteurs comptent des THREADS uniques (pas des messages),
     // et chaque compteur reflète exactement la liste affichée quand on clique
     // sur le filtre correspondant.
-    const c: Record<Filter, number> = { all: 0, unread: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0 }
+    const c: Record<Filter, number> = { all: 0, unread: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0, sent: 0 }
 
     // Classifications → source = DB (analyzedEmails), comme filteredEmails.
     const threadsByClass: Record<Classification, Set<string>> = {
@@ -188,8 +201,13 @@ export default function Dashboard() {
     c.unread = unreadThreads.size
     c.unanalyzed = unanalyzedThreads.size
 
+    // Envoyés → threads uniques dans la liste sent
+    const sentThreads = new Set<string>()
+    for (const e of sentEmails) sentThreads.add(e.thread_id || e.gmail_id)
+    c.sent = sentThreads.size
+
     return c
-  }, [enrichedInbox, analyzedEmails])
+  }, [enrichedInbox, analyzedEmails, sentEmails])
 
   const filteredEmails = useMemo(() => {
     let list: GmailEmail[]
@@ -202,6 +220,9 @@ export default function Dashboard() {
     } else if (filter === 'unanalyzed') {
       // Page Gmail courante uniquement (non-analysés)
       list = enrichedInbox.filter(e => !e.is_analyzed)
+    } else if (filter === 'sent') {
+      // Derniers envois Gmail
+      list = sentEmails
     } else {
       // Filtre par classification → on prend TOUS les emails analysés de la DB
       // (peut inclure des emails hors page Gmail courante).
@@ -262,13 +283,19 @@ export default function Dashboard() {
     }
     grouped.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
     return grouped
-  }, [enrichedInbox, filter])
+  }, [enrichedInbox, sentEmails, analyzedEmails, filter])
 
   // ─────────────────────────────────────────────────────────────
   // Actions
   // ─────────────────────────────────────────────────────────────
   const handleSelect = (g: GmailEmail) => {
     setAnalyzing(false)
+    // Cas 0 : email envoyé → on l'ouvre directement dans Gmail (lecture seule)
+    if (g.folder === 'sent') {
+      const tid = g.thread_id || g.gmail_id
+      window.open(`https://mail.google.com/mail/u/0/#sent/${tid}`, '_blank', 'noopener')
+      return
+    }
     // Cas 1 : déjà analysé → on a la row DB en mémoire
     if (g.is_analyzed && g.email_db_id) {
       const dbRow = analyzedByGmailId.get(g.gmail_id)
@@ -390,7 +417,7 @@ export default function Dashboard() {
       return e
     }))
     try {
-      await apiPost('/mark-read', { gmail_id: gmailId, unread: newUnread })
+      await apiPost('/mark-read', { gmail_id: gmailId, thread_id: threadId, unread: newUnread })
     } catch (err) {
       console.error('[mark-read] failed:', err)
       // Revert
@@ -528,7 +555,7 @@ export default function Dashboard() {
           {FILTERS.map(f => {
             const active = filter === f.key
             const count = counts[f.key]
-            const showCount = f.key !== 'all' && f.key !== 'unanalyzed' && count > 0
+            const showCount = f.key !== 'all' && f.key !== 'unanalyzed' && f.key !== 'sent' && count > 0
             return (
               <button
                 key={f.key}
@@ -582,7 +609,7 @@ export default function Dashboard() {
         {FILTERS.map(f => {
           const active = filter === f.key
           const count = counts[f.key]
-          const showCount = f.key !== 'all' && f.key !== 'unanalyzed'
+          const showCount = f.key !== 'all' && f.key !== 'unanalyzed' && f.key !== 'sent'
           return (
             <button
               key={f.key}
@@ -736,48 +763,410 @@ export default function Dashboard() {
 
       {/* ── Modal Usage ── */}
       {usageOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-          onClick={e => { if (e.target === e.currentTarget) setUsageOpen(false) }}
-        >
-          <div className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#EDE8E0]">
-              <h2 className="text-lg font-semibold text-[#1a1a1a]">Usage Claude — Coût du bot</h2>
-              <button onClick={() => setUsageOpen(false)} className="text-[#999] hover:text-[#1a1a1a] text-xl leading-none">×</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {usageLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin h-6 w-6 border-2 border-[#E8452A] border-t-transparent rounded-full" />
-                </div>
-              ) : usageData?.error ? (
-                <p className="text-red-600 text-sm">{usageData.error}</p>
-              ) : usageData?.summary ? (
-                <>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-[#F5F0EA] rounded-xl p-4">
-                      <p className="text-xs text-[#999] uppercase tracking-wider mb-1">Coût total</p>
-                      <p className="text-2xl font-bold text-[#1a1a1a]">${usageData.summary.total_cost.toFixed(4)}</p>
-                    </div>
-                    <div className="bg-[#F5F0EA] rounded-xl p-4">
-                      <p className="text-xs text-[#999] uppercase tracking-wider mb-1">Coût moyen / mail</p>
-                      <p className="text-2xl font-bold text-[#1a1a1a]">${usageData.summary.avg_cost_per_email.toFixed(5)}</p>
-                      <p className="text-[10px] text-[#999] mt-1">sur {usageData.summary.emails_processed} mail{usageData.summary.emails_processed > 1 ? 's' : ''}</p>
-                    </div>
-                    <div className="bg-[#F5F0EA] rounded-xl p-4">
-                      <p className="text-xs text-[#999] uppercase tracking-wider mb-1">Appels totaux</p>
-                      <p className="text-2xl font-bold text-[#1a1a1a]">{usageData.summary.total_calls}</p>
-                      <p className="text-[10px] text-[#999] mt-1">{usageData.summary.total_input.toLocaleString()} in / {usageData.summary.total_output.toLocaleString()} out</p>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>,
+        <UsageModal
+          data={usageData}
+          loading={usageLoading}
+          onClose={() => setUsageOpen(false)}
+          onRefresh={openUsage}
+        />,
         document.body,
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Modal Usage : vue complète des coûts Claude
+// ─────────────────────────────────────────────────────────────
+type UsageTab = 'overview' | 'functions' | 'logs'
+
+function UsageModal({
+  data,
+  loading,
+  onClose,
+  onRefresh,
+}: {
+  data: any
+  loading: boolean
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  const [tab, setTab] = useState<UsageTab>('overview')
+  const [logFilter, setLogFilter] = useState<string>('all')
+
+  const fmtUsd = (n: number, digits = 4) =>
+    `$${(n ?? 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+  const fmtInt = (n: number) => (n ?? 0).toLocaleString('fr-FR')
+  const fmtDate = (s?: string) => {
+    if (!s) return '—'
+    const d = new Date(s)
+    return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
+
+  const filteredLog = useMemo(() => {
+    const log: any[] = data?.log ?? []
+    return logFilter === 'all' ? log : log.filter(l => l.function_name === logFilter)
+  }, [data?.log, logFilter])
+
+  const functionNames: string[] = useMemo(() => {
+    const log: any[] = data?.log ?? []
+    const set = new Set<string>()
+    log.forEach(l => set.add(l.function_name))
+    return Array.from(set).sort()
+  }, [data?.log])
+
+  const maxDayCost = useMemo(() => {
+    const days: any[] = data?.by_day ?? []
+    return days.reduce((m, d) => Math.max(m, d.cost ?? 0), 0)
+  }, [data?.by_day])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="w-full max-w-6xl max-h-[92vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#EDE8E0]">
+          <div>
+            <h2 className="text-lg font-semibold text-[#1a1a1a]">Usage Claude — Coût du bot</h2>
+            {data?.summary?.last_call_at && (
+              <p className="text-[11px] text-[#999] mt-0.5">
+                Dernier appel : {fmtDate(data.summary.last_call_at)}
+                {data.summary.first_call_at && ` · Premier appel : ${fmtDate(data.summary.first_call_at)}`}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="text-[12px] px-3 py-1.5 rounded-lg border border-[#EDE8E0] text-[#555] hover:bg-[#F5F0EA] disabled:opacity-40 transition-colors"
+            >
+              {loading ? 'Chargement…' : 'Actualiser'}
+            </button>
+            <button onClick={onClose} className="text-[#999] hover:text-[#1a1a1a] text-2xl leading-none px-2">×</button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 px-6 pt-3 border-b border-[#EDE8E0] bg-[#FAF7F2]">
+          {([
+            { k: 'overview',  l: 'Vue d\'ensemble' },
+            { k: 'functions', l: 'Par fonction / modèle' },
+            { k: 'logs',      l: `Logs détaillés${data?.log ? ` (${data.log.length})` : ''}` },
+          ] as Array<{k: UsageTab; l: string}>).map(t => (
+            <button
+              key={t.k}
+              onClick={() => setTab(t.k)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+                tab === t.k
+                  ? 'bg-white text-[#1a1a1a] border border-b-white border-[#EDE8E0] -mb-px'
+                  : 'text-[#888] hover:text-[#1a1a1a]'
+              }`}
+            >
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {loading && !data ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin h-6 w-6 border-2 border-[#E8452A] border-t-transparent rounded-full" />
+            </div>
+          ) : data?.error ? (
+            <p className="text-red-600 text-sm">{data.error}</p>
+          ) : !data?.summary ? (
+            <p className="text-[#888] text-sm">Aucune donnée disponible.</p>
+          ) : (
+            <>
+              {/* ── TAB : Vue d'ensemble ── */}
+              {tab === 'overview' && (
+                <>
+                  {/* Cartes principales */}
+                  <div className="grid grid-cols-4 gap-3">
+                    <StatCard label="Coût total" value={fmtUsd(data.summary.total_cost)} sub={`${fmtInt(data.summary.total_calls)} appels`} />
+                    <StatCard label="Coût / mail traité" value={fmtUsd(data.summary.avg_cost_per_email, 5)} sub={`sur ${fmtInt(data.summary.emails_processed)} mail${data.summary.emails_processed > 1 ? 's' : ''}`} />
+                    <StatCard label="Coût / appel" value={fmtUsd(data.summary.avg_cost_per_call, 5)} sub="tous appels confondus" />
+                    <StatCard label="Classify (mail)" value={fmtUsd(data.summary.classify_cost)} sub="part la plus chère" highlight />
+                  </div>
+
+                  {/* Fenêtres temporelles */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <StatCard label="24 dernières heures" value={fmtUsd(data.summary.cost_24h)} sub={`${fmtInt(data.summary.calls_24h)} appel${data.summary.calls_24h > 1 ? 's' : ''}`} compact />
+                    <StatCard label="7 derniers jours"    value={fmtUsd(data.summary.cost_7d)}  sub={`${fmtInt(data.summary.calls_7d)} appel${data.summary.calls_7d > 1 ? 's' : ''}`}  compact />
+                    <StatCard label="30 derniers jours"   value={fmtUsd(data.summary.cost_30d)} sub={`${fmtInt(data.summary.calls_30d)} appel${data.summary.calls_30d > 1 ? 's' : ''}`} compact />
+                  </div>
+
+                  {/* Tokens */}
+                  <section>
+                    <h3 className="text-xs uppercase tracking-widest text-[#888] font-bold mb-2">Tokens consommés</h3>
+                    <div className="grid grid-cols-4 gap-3">
+                      <TokenCard label="Input"            value={data.summary.total_input} accent="#1a1a1a" />
+                      <TokenCard label="Output"           value={data.summary.total_output} accent="#E8452A" />
+                      <TokenCard label="Cache read"       value={data.summary.total_cache_read} accent="#F768A8" />
+                      <TokenCard label="Cache creation"   value={data.summary.total_cache_creation} accent="#FBBED7" />
+                    </div>
+                  </section>
+
+                  {/* Tarifs */}
+                  {data.pricing && (
+                    <section>
+                      <h3 className="text-xs uppercase tracking-widest text-[#888] font-bold mb-2">Tarifs Anthropic (USD / 1M tokens)</h3>
+                      <div className="bg-[#F5F0EA] rounded-xl overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-[#EDE8E0] text-[#666]">
+                            <tr>
+                              <th className="text-left px-4 py-2 font-medium">Modèle</th>
+                              <th className="text-right px-4 py-2 font-medium">Input</th>
+                              <th className="text-right px-4 py-2 font-medium">Output</th>
+                              <th className="text-right px-4 py-2 font-medium">Cache read (×0,1)</th>
+                              <th className="text-right px-4 py-2 font-medium">Cache write (×1,25)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(data.pricing).map(([m, p]: any) => (
+                              <tr key={m} className="border-t border-[#E5DDD0]">
+                                <td className="px-4 py-2 font-mono text-[12px]">{m}</td>
+                                <td className="text-right px-4 py-2">{fmtUsd(p.input, 2)}</td>
+                                <td className="text-right px-4 py-2">{fmtUsd(p.output, 2)}</td>
+                                <td className="text-right px-4 py-2 text-[#888]">{fmtUsd(p.input * 0.1, 2)}</td>
+                                <td className="text-right px-4 py-2 text-[#888]">{fmtUsd(p.input * 1.25, 2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Timeline 30 jours */}
+                  {Array.isArray(data.by_day) && data.by_day.length > 0 && (
+                    <section>
+                      <h3 className="text-xs uppercase tracking-widest text-[#888] font-bold mb-2">30 derniers jours</h3>
+                      <div className="bg-[#F5F0EA] rounded-xl p-4">
+                        <div className="flex items-end gap-1 h-32">
+                          {data.by_day.map((d: any) => {
+                            const pct = maxDayCost > 0 ? (d.cost / maxDayCost) * 100 : 0
+                            return (
+                              <div
+                                key={d.day}
+                                className="flex-1 group relative flex flex-col items-center justify-end min-w-0"
+                                title={`${d.day} · ${fmtUsd(d.cost)} · ${d.calls} appels`}
+                              >
+                                <div
+                                  className="w-full bg-[#E8452A] hover:bg-[#F0024F] transition-colors rounded-t"
+                                  style={{ height: `${Math.max(pct, 2)}%` }}
+                                />
+                                <div className="absolute -top-8 left-1/2 -translate-x-1/2 hidden group-hover:block bg-[#1a1a1a] text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10">
+                                  {d.day} · {fmtUsd(d.cost)} · {d.calls}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div className="flex justify-between text-[10px] text-[#999] mt-2">
+                          <span>{data.by_day[0]?.day}</span>
+                          <span>{data.by_day[data.by_day.length - 1]?.day}</span>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+
+              {/* ── TAB : Par fonction / modèle ── */}
+              {tab === 'functions' && (
+                <>
+                  <section>
+                    <h3 className="text-xs uppercase tracking-widest text-[#888] font-bold mb-2">Par fonction × modèle</h3>
+                    <div className="overflow-x-auto rounded-xl border border-[#EDE8E0]">
+                      <table className="w-full text-sm">
+                        <thead className="bg-[#F5F0EA] text-[#666]">
+                          <tr>
+                            <th className="text-left px-4 py-2 font-medium">Fonction</th>
+                            <th className="text-left px-4 py-2 font-medium">Modèle</th>
+                            <th className="text-right px-4 py-2 font-medium">Appels</th>
+                            <th className="text-right px-4 py-2 font-medium">Input</th>
+                            <th className="text-right px-4 py-2 font-medium">Output</th>
+                            <th className="text-right px-4 py-2 font-medium">Cache R/W</th>
+                            <th className="text-right px-4 py-2 font-medium">Coût</th>
+                            <th className="text-right px-4 py-2 font-medium">$/appel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(data.by_function ?? []).map((row: any, i: number) => (
+                            <tr key={i} className="border-t border-[#EDE8E0] hover:bg-[#FAF7F2]">
+                              <td className="px-4 py-2 font-mono text-[12px] text-[#1a1a1a]">{row.function_name}</td>
+                              <td className="px-4 py-2 font-mono text-[11px] text-[#666]">{row.model}</td>
+                              <td className="text-right px-4 py-2">{fmtInt(row.calls)}</td>
+                              <td className="text-right px-4 py-2 text-[#666]">{fmtInt(row.input_tokens)}</td>
+                              <td className="text-right px-4 py-2 text-[#666]">{fmtInt(row.output_tokens)}</td>
+                              <td className="text-right px-4 py-2 text-[#999] text-[12px]">
+                                {fmtInt(row.cache_read_tokens)} / {fmtInt(row.cache_creation_tokens)}
+                              </td>
+                              <td className="text-right px-4 py-2 font-semibold">{fmtUsd(row.cost)}</td>
+                              <td className="text-right px-4 py-2 text-[#666] text-[12px]">
+                                {row.calls > 0 ? fmtUsd(row.cost / row.calls, 5) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                          {(data.by_function ?? []).length === 0 && (
+                            <tr><td colSpan={8} className="text-center px-4 py-6 text-[#888]">Aucun appel enregistré.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-xs uppercase tracking-widest text-[#888] font-bold mb-2">Par modèle</h3>
+                    <div className="overflow-x-auto rounded-xl border border-[#EDE8E0]">
+                      <table className="w-full text-sm">
+                        <thead className="bg-[#F5F0EA] text-[#666]">
+                          <tr>
+                            <th className="text-left px-4 py-2 font-medium">Modèle</th>
+                            <th className="text-right px-4 py-2 font-medium">Appels</th>
+                            <th className="text-right px-4 py-2 font-medium">Input</th>
+                            <th className="text-right px-4 py-2 font-medium">Output</th>
+                            <th className="text-right px-4 py-2 font-medium">Cache R/W</th>
+                            <th className="text-right px-4 py-2 font-medium">Coût</th>
+                            <th className="text-right px-4 py-2 font-medium">% du total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(data.by_model ?? []).map((row: any, i: number) => {
+                            const pct = data.summary.total_cost > 0 ? (row.cost / data.summary.total_cost) * 100 : 0
+                            return (
+                              <tr key={i} className="border-t border-[#EDE8E0] hover:bg-[#FAF7F2]">
+                                <td className="px-4 py-2 font-mono text-[12px]">{row.model}</td>
+                                <td className="text-right px-4 py-2">{fmtInt(row.calls)}</td>
+                                <td className="text-right px-4 py-2 text-[#666]">{fmtInt(row.input_tokens)}</td>
+                                <td className="text-right px-4 py-2 text-[#666]">{fmtInt(row.output_tokens)}</td>
+                                <td className="text-right px-4 py-2 text-[#999] text-[12px]">
+                                  {fmtInt(row.cache_read_tokens)} / {fmtInt(row.cache_creation_tokens)}
+                                </td>
+                                <td className="text-right px-4 py-2 font-semibold">{fmtUsd(row.cost)}</td>
+                                <td className="text-right px-4 py-2 text-[#666]">{pct.toFixed(1)}%</td>
+                              </tr>
+                            )
+                          })}
+                          {(data.by_model ?? []).length === 0 && (
+                            <tr><td colSpan={7} className="text-center px-4 py-6 text-[#888]">Aucun appel enregistré.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </>
+              )}
+
+              {/* ── TAB : Logs ── */}
+              {tab === 'logs' && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs uppercase tracking-widest text-[#888] font-bold">Filtre fonction</span>
+                    <button
+                      onClick={() => setLogFilter('all')}
+                      className={`text-[12px] px-2.5 py-1 rounded-full transition-colors ${
+                        logFilter === 'all' ? 'bg-[#1a1a1a] text-white' : 'bg-[#F5F0EA] text-[#555] hover:bg-[#EDE8E0]'
+                      }`}
+                    >
+                      Toutes ({data.log?.length ?? 0})
+                    </button>
+                    {functionNames.map(name => {
+                      const count = (data.log ?? []).filter((l: any) => l.function_name === name).length
+                      return (
+                        <button
+                          key={name}
+                          onClick={() => setLogFilter(name)}
+                          className={`text-[12px] px-2.5 py-1 rounded-full transition-colors ${
+                            logFilter === name ? 'bg-[#1a1a1a] text-white' : 'bg-[#F5F0EA] text-[#555] hover:bg-[#EDE8E0]'
+                          }`}
+                        >
+                          {name} ({count})
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-[#EDE8E0]">
+                    <table className="w-full text-[12px]">
+                      <thead className="bg-[#F5F0EA] text-[#666] sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Date</th>
+                          <th className="text-left px-3 py-2 font-medium">Fonction</th>
+                          <th className="text-left px-3 py-2 font-medium">Modèle</th>
+                          <th className="text-right px-3 py-2 font-medium">In</th>
+                          <th className="text-right px-3 py-2 font-medium">Out</th>
+                          <th className="text-right px-3 py-2 font-medium">Cache R</th>
+                          <th className="text-right px-3 py-2 font-medium">Cache W</th>
+                          <th className="text-right px-3 py-2 font-medium">Coût</th>
+                          <th className="text-left px-3 py-2 font-medium">Sujet</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredLog.map((row: any) => (
+                          <tr key={row.id} className="border-t border-[#EDE8E0] hover:bg-[#FAF7F2]">
+                            <td className="px-3 py-1.5 whitespace-nowrap text-[#666]">{fmtDate(row.created_at)}</td>
+                            <td className="px-3 py-1.5 font-mono text-[11px]">{row.function_name}</td>
+                            <td className="px-3 py-1.5 font-mono text-[11px] text-[#888]">
+                              {row.model?.replace('claude-', '').replace('-20251001', '')}
+                            </td>
+                            <td className="text-right px-3 py-1.5 text-[#666]">{fmtInt(row.input_tokens)}</td>
+                            <td className="text-right px-3 py-1.5 text-[#666]">{fmtInt(row.output_tokens)}</td>
+                            <td className="text-right px-3 py-1.5 text-[#999]">{fmtInt(row.cache_read_tokens)}</td>
+                            <td className="text-right px-3 py-1.5 text-[#999]">{fmtInt(row.cache_creation_tokens)}</td>
+                            <td className="text-right px-3 py-1.5 font-semibold whitespace-nowrap">{fmtUsd(row.cost_usd, 5)}</td>
+                            <td className="px-3 py-1.5 text-[#666] max-w-[260px] truncate" title={row.email_subject ?? ''}>
+                              {row.email_subject ?? <span className="text-[#bbb]">—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredLog.length === 0 && (
+                          <tr><td colSpan={9} className="text-center px-3 py-6 text-[#888]">Aucun appel.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="text-[11px] text-[#999]">
+                    {filteredLog.length} entrée{filteredLog.length > 1 ? 's' : ''} affichée{filteredLog.length > 1 ? 's' : ''} ·
+                    coût cumulé : {fmtUsd(filteredLog.reduce((s: number, r: any) => s + (r.cost_usd ?? 0), 0), 5)}
+                    {' · '}limite 500 entrées les plus récentes
+                  </p>
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatCard({
+  label, value, sub, highlight, compact,
+}: { label: string; value: string; sub?: string; highlight?: boolean; compact?: boolean }) {
+  return (
+    <div className={`rounded-xl p-4 ${highlight ? 'bg-[#FEE9E5] border border-[#F0024F]/20' : 'bg-[#F5F0EA]'}`}>
+      <p className="text-[10px] text-[#999] uppercase tracking-wider mb-1">{label}</p>
+      <p className={`${compact ? 'text-xl' : 'text-2xl'} font-bold text-[#1a1a1a]`}>{value}</p>
+      {sub && <p className="text-[10px] text-[#999] mt-1">{sub}</p>}
+    </div>
+  )
+}
+
+function TokenCard({ label, value, accent }: { label: string; value: number; accent: string }) {
+  return (
+    <div className="rounded-xl p-3 bg-white border border-[#EDE8E0]">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="w-2 h-2 rounded-full" style={{ background: accent }} />
+        <p className="text-[10px] text-[#999] uppercase tracking-wider">{label}</p>
+      </div>
+      <p className="text-lg font-bold text-[#1a1a1a]">{(value ?? 0).toLocaleString('fr-FR')}</p>
     </div>
   )
 }

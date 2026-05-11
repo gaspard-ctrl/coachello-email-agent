@@ -3,7 +3,7 @@
 // Utilisé par manual-poll, poll-emails (cron) et analyze-email (à la demande)
 // ============================================================
 import { getDb } from './_db.js';
-import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead } from './_gmail.js';
+import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead, getThreadHistory } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export type ProcessResult =
@@ -52,10 +52,12 @@ export async function processOneEmail(
     const payload = msgRes.data.payload;
     if (!payload) return { status: 'skipped', reason: 'no payload' };
 
+    const msgThreadId = threadId ?? msgRes.data.threadId ?? '';
+
     // ── Ignorer les messages envoyés (label SENT) ──
     const labelIds = msgRes.data.labelIds ?? [];
     if (labelIds.includes('SENT')) {
-      await markAsRead(gmailId);
+      if (msgThreadId) await markAsRead(msgThreadId);
       return { status: 'skipped', reason: 'label SENT' };
     }
 
@@ -67,7 +69,7 @@ export async function processOneEmail(
     const subject = getHeader(headers, 'Subject') || '(sans objet)';
     const dateStr = getHeader(headers, 'Date');
     const receivedAt = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
-    const effectiveThreadId = threadId ?? msgRes.data.threadId ?? '';
+    const effectiveThreadId = msgThreadId;
 
     const fromMatch = fromRaw.match(/^(.*?)\s*<(.+?)>$/) ?? [null, fromRaw, fromRaw];
     const fromName = (fromMatch[1] ?? '').replace(/"/g, '').trim();
@@ -75,7 +77,7 @@ export async function processOneEmail(
 
     // ── Ignorer nos propres envois ──
     if (gmailAddress && fromEmail.toLowerCase() === gmailAddress) {
-      await markAsRead(gmailId);
+      if (effectiveThreadId) await markAsRead(effectiveThreadId);
       return { status: 'skipped', reason: 'own email' };
     }
 
@@ -91,6 +93,9 @@ export async function processOneEmail(
       return { status: 'skipped', reason: 'empty body' };
     }
 
+    // ── Historique du thread (pour éviter de re-classer URGENT une simple relance) ──
+    const threadHistory = await getThreadHistory(effectiveThreadId, gmailId, gmailAddress);
+
     // ── Appel Claude ──
     const result = await classifyAndDraftEmail({
       guide: context.guide,
@@ -99,7 +104,8 @@ export async function processOneEmail(
       fromEmail,
       fromName,
       subject,
-      body: effectiveBody.slice(0, 3000),
+      body: effectiveBody,
+      threadHistory,
     });
 
     // ── Stocker en base (fallback progressif si colonnes manquantes) ──

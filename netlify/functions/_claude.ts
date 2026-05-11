@@ -137,6 +137,7 @@ export async function classifyAndDraftEmail(opts: {
   subject: string;
   body: string;
   context?: string;
+  threadHistory?: Array<{ from: string; date: string; isOwn: boolean; body: string }>;
 }): Promise<ClaudeEmailResult> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -147,7 +148,7 @@ export async function classifyAndDraftEmail(opts: {
 
   // Construire la section exemples
   const examplesText = opts.examples.length > 0
-    ? opts.examples.slice(0, 8).map((ex, i) =>
+    ? opts.examples.map((ex, i) =>
         `### Exemple ${i + 1} (${ex.classification})\n**Email reçu:**\n${ex.email_body}\n\n**Réponse idéale:**\n${ex.ideal_response}`
       ).join('\n\n---\n\n')
     : 'Aucun exemple disponible pour l\'instant.';
@@ -178,12 +179,18 @@ Réponds UNIQUEMENT en JSON valide, sans markdown autour, avec exactement cette 
   "draft_response": "Le brouillon de réponse complet, prêt à être envoyé"
 }`;
 
+  const threadBlock = opts.threadHistory && opts.threadHistory.length > 0
+    ? `\n**Historique du thread (du plus ancien au plus récent, le message à traiter étant le dernier) :**\n${opts.threadHistory.map((m, i) =>
+        `--- Message ${i + 1} ${m.isOwn ? '(NOUS — Coachello)' : `(${m.from})`} — ${m.date} ---\n${m.body}`
+      ).join('\n\n')}\n\n⚠ Ce thread compte déjà ${opts.threadHistory.length} message(s) précédent(s). Tiens compte de cet historique pour la classification : un message qui continue une conversation déjà en cours n'est généralement PAS urgent, sauf nouvelle information critique. Si nous avons déjà répondu, ne propose pas une réponse redondante.\n`
+    : '';
+
   const userMessage = `Voici l'email à traiter :
 
 **De :** ${opts.fromName} <${opts.fromEmail}>
 **Objet :** ${opts.subject}
-
-**Corps du message :**
+${threadBlock}
+**Corps du nouveau message :**
 ${opts.body}
 ${opts.context ? `\n---\n**Instructions spécifiques de l'équipe pour cette réponse :**\n${opts.context}\n---\n` : ''}
 Classifie cet email et rédige un brouillon de réponse approprié.`;
@@ -191,8 +198,17 @@ Classifie cet email et rédige un brouillon de réponse approprié.`;
   const model = await getConfiguredModel();
   const response = await client.messages.create({
     model,
-    max_tokens: 1500,
-    system: systemPrompt,
+    // P95 réel des outputs = 546 tokens → 800 couvre 99% des cas et coupe
+    // la latence max de génération de ~12s à ~6s sur Haiku.
+    max_tokens: 800,
+    // Prompt caching (TTL 5 min) : le system prompt (guide + exemples + règles)
+    // est stable entre les appels. Cache hit = 90% économie input + latence
+    // divisée par ~3. Le 1er appel paye 1.25× (cache write).
+    // Cast `as any` car la version 0.32 de @anthropic-ai/sdk n'expose pas
+    // encore cache_control dans les types publics (l'API runtime le supporte).
+    system: [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+    ] as any,
     messages: [{ role: 'user', content: userMessage }],
   });
 
@@ -258,9 +274,9 @@ export async function redraftWithContext(opts: {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const examplesText = opts.examples.length > 0
-    ? opts.examples.slice(0, 3).map((ex, i) =>
-        `Exemple ${i + 1} (${ex.classification}) — Email: ${ex.email_body.slice(0, 150)} → Réponse: ${ex.ideal_response.slice(0, 200)}`
-      ).join('\n\n')
+    ? opts.examples.map((ex, i) =>
+        `### Exemple ${i + 1} (${ex.classification})\n**Email reçu:**\n${ex.email_body}\n\n**Réponse idéale:**\n${ex.ideal_response}`
+      ).join('\n\n---\n\n')
     : '';
 
   const model = await getConfiguredModel();
@@ -268,12 +284,12 @@ export async function redraftWithContext(opts: {
     model,
     max_tokens: 800,
     system: `Tu es l'assistant email de Coachello. Rédige un brouillon de réponse complet et prêt à envoyer.
-${opts.guide ? `\nGuide : ${opts.guide.slice(0, 800)}` : ''}
-${examplesText ? `\nExemples de réponses validées :\n${examplesText}` : ''}
+${opts.guide ? `\n## Guide de réponse\n${opts.guide}` : ''}
+${examplesText ? `\n## Exemples de réponses validées\n${examplesText}` : ''}
 Réponds UNIQUEMENT avec le texte de la réponse, sans introduction ni commentaire.`,
     messages: [{
       role: 'user',
-      content: `Email de ${opts.fromName} <${opts.fromEmail}> — Objet : ${opts.subject}\n\n${opts.body.slice(0, 2000)}\n\n---\nInstructions de l'équipe :\n${opts.context}`,
+      content: `Email de ${opts.fromName} <${opts.fromEmail}> — Objet : ${opts.subject}\n\n${opts.body}\n\n---\nInstructions de l'équipe :\n${opts.context}`,
     }],
   });
 
@@ -301,9 +317,9 @@ export async function composeEmail(opts: {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const examplesText = opts.examples.length > 0
-    ? opts.examples.slice(0, 5).map((ex, i) =>
-        `Exemple ${i + 1} (${ex.classification}) — Réponse: ${ex.ideal_response.slice(0, 250)}`
-      ).join('\n\n')
+    ? opts.examples.map((ex, i) =>
+        `### Exemple ${i + 1} (${ex.classification})\n**Email reçu:**\n${ex.email_body}\n\n**Réponse idéale:**\n${ex.ideal_response}`
+      ).join('\n\n---\n\n')
     : '';
 
   const model = await getConfiguredModel();
@@ -362,9 +378,9 @@ export async function redraftWithAnswers(opts: {
   ).join('\n\n');
 
   const examplesText = opts.examples.length > 0
-    ? opts.examples.slice(0, 3).map((ex, i) =>
-        `Exemple ${i + 1} (${ex.classification}) — Email: ${ex.email_body.slice(0, 150)} → Réponse: ${ex.ideal_response.slice(0, 200)}`
-      ).join('\n\n')
+    ? opts.examples.map((ex, i) =>
+        `### Exemple ${i + 1} (${ex.classification})\n**Email reçu:**\n${ex.email_body}\n\n**Réponse idéale:**\n${ex.ideal_response}`
+      ).join('\n\n---\n\n')
     : '';
 
   const model = 'claude-haiku-4-5-20251001';
@@ -372,8 +388,8 @@ export async function redraftWithAnswers(opts: {
     model,
     max_tokens: 800,
     system: `Tu es l'assistant email de Coachello. Rédige un brouillon de réponse complet et prêt à envoyer.
-${opts.guide ? `\nGuide : ${opts.guide.slice(0, 1000)}` : ''}
-${examplesText ? `\nExemples de réponses validées :\n${examplesText}` : ''}
+${opts.guide ? `\n## Guide de réponse\n${opts.guide}` : ''}
+${examplesText ? `\n## Exemples de réponses validées\n${examplesText}` : ''}
 Réponds UNIQUEMENT avec le texte de la réponse, sans introduction ni commentaire.`,
     messages: [{
       role: 'user',

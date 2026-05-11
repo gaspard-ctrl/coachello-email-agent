@@ -4,7 +4,7 @@
 // ============================================================
 // import type { Config } from '@netlify/functions'; // à réactiver avec le cron
 import { getDb, corsHeaders, jsonResponse } from './_db.js';
-import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead } from './_gmail.js';
+import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead, getThreadHistory } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export default async function handler(req: Request) {
@@ -46,8 +46,10 @@ export default async function handler(req: Request) {
     const processedRows = await db`SELECT gmail_id, thread_id, status FROM emails WHERE created_at > NOW() - INTERVAL '7 days' AND status != 'dismissed'`;
     const processedIds  = new Set((processedRows as any[]).map((r: any) => r.gmail_id));
     const pendingGmailIds = new Set((processedRows as any[]).filter((r: any) => r.status === 'pending').map((r: any) => r.gmail_id));
-    // Threads auxquels on a déjà répondu — ne pas retraiter les nouveaux messages du même thread
-    const sentThreadIds = new Set((processedRows as any[]).filter((r: any) => ['sent', 'draft_saved'].includes(r.status)).map((r: any) => r.thread_id).filter(Boolean));
+    // Tous les threads déjà touchés par une analyse (pending OU sent OU draft_saved)
+    // → on ne re-traite pas les nouveaux messages d'un thread déjà connu, pour
+    // éviter de réanalyser (et potentiellement re-classer URGENT) une relance.
+    const knownThreadIds = new Set((processedRows as any[]).map((r: any) => r.thread_id).filter(Boolean));
 
     // ── 3. Lister les emails non lus dans Gmail ──
     const listRes = await gmail.users.messages.list({
@@ -89,10 +91,20 @@ export default async function handler(req: Request) {
     }
 
     // ── 4. Traiter chaque email nouveau en parallèle ──
-    // Exclure les emails déjà traités ET ceux dont le thread a déjà reçu une réponse
-    const toProcess = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && sentThreadIds.has(m.threadId)));
+    // Exclure les emails déjà traités ET ceux dont le thread est déjà connu
+    // (peu importe le statut). Puis dédupe au sein du batch : un seul message
+    // par thread, même si Gmail en renvoie plusieurs nouveaux d'un coup.
+    const candidates = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && knownThreadIds.has(m.threadId)));
+    const seenThreads = new Set<string>();
+    const toProcess: typeof candidates = [];
+    for (const m of candidates) {
+      const tid = m.threadId ?? m.id!;
+      if (seenThreads.has(tid)) continue;
+      seenThreads.add(tid);
+      toProcess.push(m);
+    }
     const skipped = messages.length - toProcess.length;
-    console.log(`[poll-emails] ${toProcess.length} email(s) à traiter, ${skipped} déjà traité(s)`);
+    console.log(`[poll-emails] ${toProcess.length} thread(s) à traiter, ${skipped} déjà traité(s) ou dupliqué(s)`);
 
     const results = await Promise.all(toProcess.map(async ({ id: gmailId, threadId }) => {
       try {
@@ -147,6 +159,9 @@ export default async function handler(req: Request) {
         // Ignorer les emails vraiment vides (accusés de réception, tracking pixels, etc.)
         if (effectiveBody.length < 5 && subject === '(sans objet)') return 'skipped';
 
+        // ── Historique du thread (pour éviter de re-classer URGENT une simple relance) ──
+        const threadHistory = await getThreadHistory(threadId ?? '', gmailId!, gmailAddress);
+
         // ── 5. Appel Claude ──
         const result = await classifyAndDraftEmail({
           guide,
@@ -155,7 +170,8 @@ export default async function handler(req: Request) {
           fromEmail,
           fromName,
           subject,
-          body: effectiveBody.slice(0, 3000),
+          body: effectiveBody,
+          threadHistory,
         });
 
         // ── 6. Stocker en base (upsert : MAJ body_html + attachments si email pending) ──

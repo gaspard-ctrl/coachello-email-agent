@@ -7,6 +7,7 @@ import type { Email, GmailEmail } from '../types'
 export interface InboxCache {
   gmailEmails?: GmailEmail[]
   analyzedEmails?: Email[]
+  sentEmails?: GmailEmail[]
   nextPageToken?: string | null
   unreadCount?: number
   draftCount?: number

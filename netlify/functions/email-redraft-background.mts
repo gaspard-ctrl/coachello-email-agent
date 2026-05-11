@@ -32,7 +32,7 @@ export default async function handler(req: Request): Promise<void> {
     fromEmail: email.from_email,
     fromName:  email.from_name,
     subject:   email.subject,
-    body:      (email.body_text ?? '').slice(0, 3000),
+    body:      email.body_text ?? '',
     context,
   });
 
