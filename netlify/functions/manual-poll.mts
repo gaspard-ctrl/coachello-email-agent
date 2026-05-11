@@ -105,9 +105,20 @@ export default async function handler(req: Request) {
     }
 
     // ── 4. Identifier les emails à traiter ──
-    const toProcess = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && sentThreadIds.has(m.threadId)));
+    // On dédupe par thread_id : un seul message à traiter par thread (le plus récent
+    // que Gmail nous renvoie en premier). Évite que "Traitement N/M" affiche les
+    // messages individuels au lieu des threads visibles.
+    const candidates = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && sentThreadIds.has(m.threadId)));
+    const seenThreads = new Set<string>();
+    const toProcess: typeof candidates = [];
+    for (const m of candidates) {
+      const tid = m.threadId ?? m.id!;
+      if (seenThreads.has(tid)) continue;
+      seenThreads.add(tid);
+      toProcess.push(m);
+    }
     const skipped = messages.length - toProcess.length;
-    console.log(`[manual-poll] ${toProcess.length} email(s) à traiter, ${skipped} déjà traité(s)`);
+    console.log(`[manual-poll] ${toProcess.length} thread(s) à traiter, ${skipped} déjà traité(s) ou dupliqué(s)`);
 
     // Aucun email à traiter
     if (toProcess.length === 0) {
