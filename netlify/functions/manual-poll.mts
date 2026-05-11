@@ -62,8 +62,11 @@ export default async function handler(req: Request) {
     const processedRows = await db`SELECT gmail_id, thread_id, status FROM emails WHERE created_at > NOW() - INTERVAL '7 days' AND status != 'dismissed'`;
     const processedIds  = new Set((processedRows as any[]).map((r: any) => r.gmail_id));
     const pendingGmailIds = new Set((processedRows as any[]).filter((r: any) => r.status === 'pending').map((r: any) => r.gmail_id));
-    // Threads auxquels on a déjà répondu — ne pas retraiter les nouveaux messages du même thread
-    const sentThreadIds = new Set((processedRows as any[]).filter((r: any) => ['sent', 'draft_saved'].includes(r.status)).map((r: any) => r.thread_id).filter(Boolean));
+    // Tous les threads déjà touchés par une analyse (pending OU sent OU draft_saved)
+    // → on ne re-traite pas les nouveaux messages d'un thread déjà connu.
+    // Si l'utilisateur veut re-analyser avec un nouveau message, il clique
+    // "Faire rédiger par Claude" sur le thread directement.
+    const knownThreadIds = new Set((processedRows as any[]).map((r: any) => r.thread_id).filter(Boolean));
 
     // ── 3. Lister les emails non lus dans Gmail ──
     const listRes = await gmail.users.messages.list({
@@ -108,7 +111,7 @@ export default async function handler(req: Request) {
     // On dédupe par thread_id : un seul message à traiter par thread (le plus récent
     // que Gmail nous renvoie en premier). Évite que "Traitement N/M" affiche les
     // messages individuels au lieu des threads visibles.
-    const candidates = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && sentThreadIds.has(m.threadId)));
+    const candidates = messages.filter(m => m.id && !processedIds.has(m.id!) && !(m.threadId && knownThreadIds.has(m.threadId)));
     const seenThreads = new Set<string>();
     const toProcess: typeof candidates = [];
     for (const m of candidates) {
