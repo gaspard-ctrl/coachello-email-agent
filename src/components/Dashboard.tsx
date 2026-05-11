@@ -154,20 +154,56 @@ export default function Dashboard() {
   }, [gmailEmails, analyzedByGmailId])
 
   const counts = useMemo(() => {
+    // Compteurs des classifications : tirés de analyzedEmails (set complet
+    // de la DB, jusqu'à 100 emails — non borné à la page Gmail courante).
+    // 'all' et 'unanalyzed' ne peuvent pas être globaux (Gmail paginé) → non affichés.
     const c: Record<Filter, number> = { all: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0 }
-    for (const e of enrichedInbox) {
-      c.all++
-      if (e.is_analyzed && e.classification) c[e.classification]++
-      else c.unanalyzed++
+    for (const e of analyzedEmails) {
+      if (e.classification) c[e.classification]++
     }
     return c
-  }, [enrichedInbox])
+  }, [analyzedEmails])
 
   const filteredEmails = useMemo(() => {
     let list: GmailEmail[]
-    if (filter === 'all') list = enrichedInbox
-    else if (filter === 'unanalyzed') list = enrichedInbox.filter(e => !e.is_analyzed)
-    else list = enrichedInbox.filter(e => e.is_analyzed && e.classification === filter)
+    if (filter === 'all') {
+      // Page Gmail courante uniquement
+      list = enrichedInbox
+    } else if (filter === 'unanalyzed') {
+      // Page Gmail courante uniquement (non-analysés)
+      list = enrichedInbox.filter(e => !e.is_analyzed)
+    } else {
+      // Filtre par classification → on prend TOUS les emails analysés de la DB
+      // (peut inclure des emails hors page Gmail courante).
+      // On préfère la version "enrichedInbox" si l'email est dans la page (pour
+      // récupérer is_unread, snippet réel, etc.), sinon on convertit la row DB.
+      const inboxByGmailId = new Map(enrichedInbox.map(e => [e.gmail_id, e]))
+      list = analyzedEmails
+        .filter(e => e.classification === filter)
+        .map(e => {
+          const fromInbox = inboxByGmailId.get(e.gmail_id)
+          if (fromInbox) return fromInbox
+          // Fallback : on construit un GmailEmail à partir de la row DB
+          return {
+            gmail_id: e.gmail_id,
+            thread_id: e.thread_id,
+            folder: 'inbox' as const,
+            from_email: e.from_email,
+            from_name: e.from_name,
+            to_email: e.to_email,
+            to_name: '',
+            subject: e.subject || '(sans objet)',
+            snippet: e.body_preview ?? '',
+            received_at: e.received_at,
+            is_unread: true, // par défaut — la row DB ne stocke pas l'état Gmail
+            is_starred: false,
+            is_analyzed: true,
+            classification: e.classification,
+            email_db_id: e.id,
+            status: e.status,
+          } satisfies GmailEmail
+        })
+    }
 
     // Regroupement par thread_id : on garde le message le plus récent comme
     // représentant, on note le total et on marque non-lu si au moins un est non-lu.
@@ -462,11 +498,12 @@ export default function Dashboard() {
           {FILTERS.map(f => {
             const active = filter === f.key
             const count = counts[f.key]
+            const showCount = f.key !== 'all' && f.key !== 'unanalyzed' && count > 0
             return (
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
-                title={`${f.label} (${count})`}
+                title={showCount ? `${f.label} (${count})` : f.label}
                 className={`relative w-9 h-9 rounded-full flex items-center justify-center transition-all ${
                   active ? 'ring-2 ring-[#F0024F] ring-offset-2 ring-offset-[#F5F0EA]' : 'hover:bg-[#F0EDE8]'
                 }`}
@@ -476,7 +513,7 @@ export default function Dashboard() {
                 ) : (
                   <span className="text-[10px] font-bold text-[#555]">All</span>
                 )}
-                {count > 0 && (
+                {showCount && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-[#1a1a1a] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                     {count > 99 ? '99+' : count}
                   </span>
@@ -497,7 +534,7 @@ export default function Dashboard() {
           <button
             onClick={handlePoll}
             disabled={polling}
-            title="Lancer le polling"
+            title="Analyser tous les non lus"
             className="w-9 h-9 rounded-full bg-[#F0024F] text-white hover:bg-[#d00245] disabled:opacity-40 transition-colors flex items-center justify-center"
           >
             <svg className={`w-4 h-4 ${polling ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -515,6 +552,7 @@ export default function Dashboard() {
         {FILTERS.map(f => {
           const active = filter === f.key
           const count = counts[f.key]
+          const showCount = f.key !== 'all' && f.key !== 'unanalyzed'
           return (
             <button
               key={f.key}
@@ -529,11 +567,13 @@ export default function Dashboard() {
                 {f.dot && <span className={`w-2.5 h-2.5 rounded-full ${f.dot}`} />}
                 {f.label}
               </span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                active ? 'bg-white/30 text-white' : 'bg-[#EDE8E0] text-[#888]'
-              }`}>
-                {count}
-              </span>
+              {showCount && (
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                  active ? 'bg-white/30 text-white' : 'bg-[#EDE8E0] text-[#888]'
+                }`}>
+                  {count}
+                </span>
+              )}
             </button>
           )
         })}
@@ -553,9 +593,9 @@ export default function Dashboard() {
             {polling ? (
               <span className="flex items-center justify-center gap-1.5">
                 <span className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />
-                Polling...
+                Analyse en cours...
               </span>
-            ) : 'Lancer le polling'}
+            ) : 'Analyser tous les non lus'}
           </button>
           {counts.FAIBLE > 0 && (
             <button
