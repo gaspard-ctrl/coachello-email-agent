@@ -19,6 +19,9 @@ export default async function handler(req: Request) {
     return errorResponse('Méthode non autorisée', 405);
   }
 
+  const t0 = Date.now();
+  const log = (step: string) => console.log(`[analyze-email][+${Date.now() - t0}ms] ${step}`);
+
   try {
     const body = await req.json().catch(() => ({}));
     const gmailId = body.gmail_id as string | undefined;
@@ -28,6 +31,7 @@ export default async function handler(req: Request) {
       return errorResponse('gmail_id requis', 400);
     }
 
+    log(`START gmail_id=${gmailId}`);
     const gmail = getGmailClient();
     const gmailAddress = (process.env.GMAIL_ADDRESS ?? '').toLowerCase();
     const db = getDb();
@@ -35,6 +39,7 @@ export default async function handler(req: Request) {
     // ── 0. Court-circuit : si déjà en DB, on renvoie la row complète sans Claude ──
     // SELECT léger sans body_html (qui peut faire 80k chars sur un newsletter)
     const exists = await db`SELECT id FROM emails WHERE gmail_id = ${gmailId} LIMIT 1` as any[];
+    log(`exists check (${exists.length})`);
     if (exists.length > 0) {
       const fullRow = await db`
         SELECT id, gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails, subject,
@@ -60,6 +65,7 @@ export default async function handler(req: Request) {
       db`SELECT email_body, ideal_response, classification FROM examples ORDER BY created_at DESC LIMIT 20`.catch(() => []),
       db`SELECT rule_type, value, classification FROM classification_rules`.catch(() => []),
     ]);
+    log(`context loaded (guide=${(guideRows[0] as any)?.content?.length ?? 0}c, ${(exampleRows as any[]).length} examples, ${(ruleRows as any[]).length} rules)`);
 
     const guide    = (guideRows[0] as any)?.content ?? '';
     const examples = exampleRows as any[];
@@ -71,6 +77,7 @@ export default async function handler(req: Request) {
       id: gmailId,
       format: 'full',
     });
+    log(`gmail.messages.get done`);
 
     const payload = msgRes.data.payload;
     if (!payload) {
@@ -109,6 +116,7 @@ export default async function handler(req: Request) {
 
     const { text: bodyText, html: bodyHtml } = extractBody(payload);
     const attachments = extractAttachments(payload);
+    log(`body extracted (text=${bodyText.length}c, html=${bodyHtml.length}c, ${attachments.length} attachments)`);
 
     let effectiveBody = bodyText.trim();
     if (effectiveBody.length < 10 && bodyHtml) {
@@ -121,8 +129,10 @@ export default async function handler(req: Request) {
 
     // ── Historique du thread (pour éviter URGENT sur une simple relance) ──
     const threadHistory = await getThreadHistory(effectiveThreadId, gmailId, gmailAddress);
+    log(`thread history fetched (${threadHistory.length} prior messages)`);
 
     // ── Appel Claude (identique à manual-poll lignes 193-202) ──
+    log(`→ calling Claude with body=${effectiveBody.length}c, examples=${examples.length}, threadHistory=${threadHistory.length}`);
     const result = await classifyAndDraftEmail({
       guide,
       examples,
@@ -133,6 +143,7 @@ export default async function handler(req: Request) {
       body: effectiveBody,
       threadHistory,
     });
+    log(`✓ Claude responded (${result.classification}, draft=${(result.draft_response ?? '').length}c)`);
 
     // ── Stocker en base (fallback progressif si colonnes manquantes) ──
     try {
