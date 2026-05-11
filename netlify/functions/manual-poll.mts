@@ -15,19 +15,18 @@ export default async function handler(req: Request) {
   const gmail = getGmailClient();
   const gmailAddress = (process.env.GMAIL_ADDRESS ?? '').toLowerCase();
   // Exclure nos propres envois : -from:me ET -from:adresse explicite
-  const excludeSelf = gmailAddress ? `in:inbox is:unread -from:me -from:${gmailAddress} newer_than:3d` : 'in:inbox is:unread -from:me newer_than:3d';
+  // Pas de limite de date : on veut traiter tout ce que l'utilisateur voit dans l'inbox.
+  const excludeSelf = gmailAddress ? `in:inbox is:unread -from:me -from:${gmailAddress}` : 'in:inbox is:unread -from:me';
 
   const url = new URL(req.url);
 
-  // ── Mode compteur : retourne le nombre réel de mails non lus ──
+  // ── Mode compteur : nombre de threads non lus dans INBOX ──
+  // On lit directement le label INBOX qui expose threadsUnread —
+  // c'est exactement la valeur affichée par Gmail dans sa sidebar.
   if (url.searchParams.get('count') === 'true') {
     try {
-      const listRes = await gmail.users.messages.list({
-        userId: 'me',
-        q: excludeSelf,
-        maxResults: 50,
-      });
-      return jsonResponse({ count: listRes.data.messages?.length ?? 0 });
+      const labelRes = await gmail.users.labels.get({ userId: 'me', id: 'INBOX' });
+      return jsonResponse({ count: labelRes.data.threadsUnread ?? 0 });
     } catch (err) {
       return jsonResponse({ count: 0 });
     }

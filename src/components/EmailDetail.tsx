@@ -415,27 +415,54 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {fileAttachments.map((att, i) => {
-                    const proxyUrl = `/api/attachment?gmailId=${encodeURIComponent(email.gmail_id)}&attachmentId=${encodeURIComponent(att.attachmentId)}&mimeType=${encodeURIComponent(att.mimeType)}`
+                    const baseParams = new URLSearchParams({
+                      gmailId: email.gmail_id,
+                      attachmentId: att.attachmentId,
+                      mimeType: att.mimeType,
+                      filename: att.filename,
+                    })
+                    const previewUrl = `/api/attachment?${baseParams.toString()}`
+                    const downloadUrl = `/api/attachment?${baseParams.toString()}&download=1`
                     const isImage = att.mimeType.startsWith('image/')
                     const isPdf = att.mimeType === 'application/pdf'
                     const canPreview = isImage || isPdf
                     const ext = att.filename.split('.').pop()?.toUpperCase() || '?'
                     return (
-                      <button
+                      <div
                         key={i}
-                        onClick={() => canPreview ? setPreviewAtt({ url: proxyUrl, filename: att.filename, mimeType: att.mimeType }) : window.open(proxyUrl)}
-                        className="flex items-center gap-3 bg-white border border-[#EDE8E0] rounded-xl px-3 py-2.5 hover:bg-[#F7F5F2] hover:border-[#D8D0C5] transition-all text-left group"
+                        className="flex items-center gap-1 bg-white border border-[#EDE8E0] rounded-xl pl-3 pr-1.5 py-1.5 hover:bg-[#F7F5F2] hover:border-[#D8D0C5] transition-all group"
                       >
-                        <div className="w-9 h-9 rounded-lg bg-[#F5F0EA] flex items-center justify-center shrink-0">
-                          {isImage ? <span className="text-[10px] font-bold text-[#E8452A]">IMG</span>
-                            : isPdf ? <span className="text-[10px] font-bold text-red-500">PDF</span>
-                              : <span className="text-[9px] font-bold text-[#888]">{ext}</span>}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-[#444] truncate">{att.filename}</p>
-                          <p className="text-[10px] text-[#aaa]">{formatSize(att.size)}</p>
-                        </div>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (canPreview) setPreviewAtt({ url: previewUrl, filename: att.filename, mimeType: att.mimeType })
+                            else window.location.assign(downloadUrl)
+                          }}
+                          className="flex items-center gap-3 flex-1 min-w-0 text-left py-1"
+                          title={canPreview ? 'Aperçu' : 'Télécharger'}
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-[#F5F0EA] flex items-center justify-center shrink-0">
+                            {isImage ? <span className="text-[10px] font-bold text-[#E8452A]">IMG</span>
+                              : isPdf ? <span className="text-[10px] font-bold text-red-500">PDF</span>
+                                : <span className="text-[9px] font-bold text-[#888]">{ext}</span>}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-[#444] truncate">{att.filename}</p>
+                            <p className="text-[10px] text-[#aaa]">{formatSize(att.size)}</p>
+                          </div>
+                        </button>
+                        <a
+                          href={downloadUrl}
+                          download={att.filename}
+                          onClick={e => e.stopPropagation()}
+                          className="p-2 rounded-lg text-[#888] hover:text-[#E8452A] hover:bg-[#F5F0EA] transition-colors shrink-0"
+                          title="Télécharger"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                          </svg>
+                        </a>
+                      </div>
                     )
                   })}
                 </div>
@@ -622,7 +649,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
             <div className="flex items-center justify-between px-5 py-3 border-b border-[#EDE8E0] flex-shrink-0">
               <p className="text-sm font-semibold truncate">{previewAtt.filename}</p>
               <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-                <a href={previewAtt.url} download={previewAtt.filename} className="text-xs text-[#E8452A] font-medium underline underline-offset-2">Télécharger</a>
+                <a href={previewAtt.url.includes('download=1') ? previewAtt.url : `${previewAtt.url}&download=1`} download={previewAtt.filename} className="text-xs text-[#E8452A] font-medium underline underline-offset-2">Télécharger</a>
                 <button onClick={() => setPreviewAtt(null)} className="p-1.5 hover:bg-[#F5F0EA] rounded-full text-[#aaa]">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>

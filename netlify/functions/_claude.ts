@@ -20,6 +20,34 @@ const PRICING: Record<string, { input: number; output: number }> = {
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const ALLOWED_MODELS = ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
 
+// Claude renvoie parfois du JSON avec des retours-ligne bruts dans les valeurs
+// (draft_response sur plusieurs lignes). C'est invalide en JSON strict — on
+// échappe les caractères de contrôle (< 0x20) à l'intérieur des string literals.
+function parseClaudeJson<T = unknown>(raw: string): T {
+  const stripped = raw.trim().replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+  let out = '';
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escape) { out += ch; escape = false; continue; }
+    if (ch === '\\') { out += ch; escape = true; continue; }
+    if (ch === '"') { inString = !inString; out += ch; continue; }
+    if (inString) {
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        out += '\\u' + code.toString(16).padStart(4, '0');
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return JSON.parse(out) as T;
+}
+
 // Cache du modèle configuré (TTL 60s) pour éviter une requête DB par email
 let _modelCache: { value: string; expiresAt: number } | null = null;
 
@@ -178,11 +206,7 @@ Classifie cet email et rédige un brouillon de réponse approprié.`;
   const content = response.content[0];
   if (content.type !== 'text') throw new Error('Réponse Claude inattendue');
 
-  // Parser le JSON retourné par Claude
-  const jsonText = content.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
-  const result = JSON.parse(jsonText) as ClaudeEmailResult;
-
-  return result;
+  return parseClaudeJson<ClaudeEmailResult>(content.text);
 }
 
 // ── Générer des questions de clarification ──────────────────────
@@ -217,8 +241,8 @@ Réponds UNIQUEMENT en JSON valide : { "questions": ["question 1", "question 2",
 
   const content = response.content[0];
   if (content.type !== 'text') throw new Error('Réponse Claude inattendue');
-  const json = JSON.parse(content.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, ''));
-  return json.questions as string[];
+  const json = parseClaudeJson<{ questions: string[] }>(content.text);
+  return json.questions;
 }
 
 // ── Régénérer le brouillon avec un contexte libre de l'équipe ──
@@ -316,8 +340,7 @@ ${opts.instructions}`,
 
   const content = response.content[0];
   if (content.type !== 'text') throw new Error('Réponse Claude inattendue');
-  const jsonText = content.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(jsonText) as { subject: string; body: string };
+  return parseClaudeJson<{ subject: string; body: string }>(content.text);
 }
 
 // ── Régénérer le brouillon avec les réponses de l'équipe ────────

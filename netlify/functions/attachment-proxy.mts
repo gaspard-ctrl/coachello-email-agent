@@ -20,6 +20,8 @@ export default async function handler(req: Request) {
   const gmailId      = url.searchParams.get('gmailId');
   const attachmentId = url.searchParams.get('attachmentId');
   const mimeType     = url.searchParams.get('mimeType') ?? 'image/png';
+  const filename     = url.searchParams.get('filename') ?? '';
+  const download     = url.searchParams.get('download') === '1';
 
   if (!gmailId || !attachmentId) {
     return new Response('Missing gmailId or attachmentId', { status: 400, headers: corsHeaders });
@@ -37,13 +39,22 @@ export default async function handler(req: Request) {
     const base64 = res.data.data!.replace(/-/g, '+').replace(/_/g, '/');
     const buffer = Buffer.from(base64, 'base64');
 
+    const headers: Record<string, string> = {
+      ...corsHeaders,
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=86400',  // Cache 24h
+    };
+    if (filename) {
+      // RFC 5987 — supporte accents/caractères non-ASCII
+      const asciiName = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+      const encodedName = encodeURIComponent(filename);
+      const disposition = download ? 'attachment' : 'inline';
+      headers['Content-Disposition'] = `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
+    }
+
     return new Response(buffer, {
       status: 200,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': mimeType,
-        'Cache-Control': 'public, max-age=86400',  // Cache 24h
-      },
+      headers,
     });
   } catch (err) {
     console.error('[attachment-proxy] Erreur:', err);

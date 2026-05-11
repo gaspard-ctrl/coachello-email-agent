@@ -29,10 +29,11 @@ class ModalErrorBoundary extends Component<
   }
 }
 
-type Filter = 'all' | Classification | 'unanalyzed'
+type Filter = 'all' | 'unread' | Classification | 'unanalyzed'
 
 const FILTERS: { key: Filter; label: string; dot?: string }[] = [
   { key: 'all',         label: 'Tous' },
+  { key: 'unread',      label: 'Non lues',  dot: 'bg-[#1a1a1a]' },
   { key: 'URGENT',      label: 'Urgent',    dot: 'bg-[#F0024F]' },
   { key: 'IMPORTANT',   label: 'Important', dot: 'bg-[#F768A8]' },
   { key: 'NORMAL',      label: 'Normal',    dot: 'bg-[#FBBED7]' },
@@ -154,21 +155,41 @@ export default function Dashboard() {
   }, [gmailEmails, analyzedByGmailId])
 
   const counts = useMemo(() => {
-    // Compteurs des classifications : tirés de analyzedEmails (set complet
-    // de la DB, jusqu'à 100 emails — non borné à la page Gmail courante).
-    // 'all' et 'unanalyzed' ne peuvent pas être globaux (Gmail paginé) → non affichés.
-    const c: Record<Filter, number> = { all: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0 }
-    for (const e of analyzedEmails) {
-      if (e.classification) c[e.classification]++
+    // Compteurs : on ne compte que les emails NON LUS (état Gmail).
+    // L'état is_unread n'existe que pour la page Gmail courante (enrichedInbox).
+    // On regroupe par thread pour rester cohérent avec l'affichage en liste.
+    const c: Record<Filter, number> = { all: 0, unread: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0 }
+
+    // 1. Threads non lus + classification dominante du thread
+    const threadsUnread = new Map<string, GmailEmail[]>()
+    for (const e of enrichedInbox) {
+      if (!e.is_unread) continue
+      const tid = e.thread_id || e.gmail_id
+      const arr = threadsUnread.get(tid) ?? []
+      arr.push(e)
+      threadsUnread.set(tid, arr)
     }
+
+    for (const emails of threadsUnread.values()) {
+      // Si un message du thread est analysé, on prend sa classification
+      const analyzed = emails.find(e => e.is_analyzed && e.classification)
+      if (analyzed?.classification) {
+        c[analyzed.classification]++
+      }
+    }
+
+    c.unread = threadsUnread.size
     return c
-  }, [analyzedEmails])
+  }, [enrichedInbox])
 
   const filteredEmails = useMemo(() => {
     let list: GmailEmail[]
     if (filter === 'all') {
       // Page Gmail courante uniquement
       list = enrichedInbox
+    } else if (filter === 'unread') {
+      // Page Gmail courante uniquement (non-lues)
+      list = enrichedInbox.filter(e => e.is_unread)
     } else if (filter === 'unanalyzed') {
       // Page Gmail courante uniquement (non-analysés)
       list = enrichedInbox.filter(e => !e.is_analyzed)
@@ -276,11 +297,22 @@ export default function Dashboard() {
   const runAnalysis = async () => {
     if (!selectedEmail) return
     setAnalyzing(true)
+    const gmailId = selectedEmail.gmail_id
+    const threadId = selectedEmail.thread_id
+    type AnalyzeResponse = { success: boolean; email?: Email; queued?: boolean; pending?: boolean; skipped?: boolean; reason?: string }
     try {
-      const res = await apiPost<{ success: boolean; email?: Email; skipped?: boolean; reason?: string }>(
-        '/analyze-email',
-        { gmail_id: selectedEmail.gmail_id, thread_id: selectedEmail.thread_id },
-      )
+      // 1er appel : retourne soit l'email (déjà analysé), soit skipped, soit déclenche la background → { queued: true }
+      let res = await apiPost<AnalyzeResponse>('/analyze-email', { gmail_id: gmailId, thread_id: threadId })
+
+      // Polling : tant que pas d'email et pas de skip, re-checker la DB toutes les 2s (max ~90s)
+      const maxAttempts = 45
+      let attempts = 0
+      while (!res.email && !res.skipped && attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 2000))
+        attempts++
+        res = await apiPost<AnalyzeResponse>('/analyze-email', { gmail_id: gmailId, thread_id: threadId, poll: true })
+      }
+
       if (res.email) {
         setSelectedEmail(res.email)
         setAnalyzedEmails(prev => {
@@ -292,6 +324,9 @@ export default function Dashboard() {
         setPollResult(`Email ignoré (${res.reason ?? 'raison inconnue'})`)
         setTimeout(() => setPollResult(null), 4000)
         setSelectedEmail(null)
+      } else {
+        setPollResult(`Analyse trop longue — ré-essaie dans un instant`)
+        setTimeout(() => setPollResult(null), 5000)
       }
     } catch (err) {
       setPollResult(`Erreur analyse : ${err instanceof Error ? err.message : 'inconnue'}`)
