@@ -306,22 +306,11 @@ export default function Dashboard() {
   const runAnalysis = async () => {
     if (!selectedEmail) return
     setAnalyzing(true)
-    const gmailId = selectedEmail.gmail_id
-    const threadId = selectedEmail.thread_id
-    type AnalyzeResponse = { success: boolean; email?: Email; queued?: boolean; pending?: boolean; skipped?: boolean; reason?: string }
     try {
-      // 1er appel : déclenche la background si l'email n'est pas en DB
-      let res = await apiPost<AnalyzeResponse>('/analyze-email', { gmail_id: gmailId, thread_id: threadId })
-
-      // Polling toutes les 2s jusqu'à ce que la BG ait écrit en DB (max ~3min)
-      const maxAttempts = 90
-      let attempts = 0
-      while (!res.email && !res.skipped && attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 2000))
-        attempts++
-        res = await apiPost<AnalyzeResponse>('/analyze-email', { gmail_id: gmailId, thread_id: threadId, poll: true })
-      }
-
+      const res = await apiPost<{ success: boolean; email?: Email; skipped?: boolean; reason?: string }>(
+        '/analyze-email',
+        { gmail_id: selectedEmail.gmail_id, thread_id: selectedEmail.thread_id },
+      )
       if (res.email) {
         setSelectedEmail(res.email)
         setAnalyzedEmails(prev => {
@@ -333,9 +322,6 @@ export default function Dashboard() {
         setPollResult(`Email ignoré (${res.reason ?? 'raison inconnue'})`)
         setTimeout(() => setPollResult(null), 4000)
         setSelectedEmail(null)
-      } else {
-        setPollResult(`Analyse trop longue — ré-essaie dans un instant`)
-        setTimeout(() => setPollResult(null), 5000)
       }
     } catch (err) {
       setPollResult(`Erreur analyse : ${err instanceof Error ? err.message : 'inconnue'}`)
