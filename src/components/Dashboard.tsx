@@ -119,7 +119,12 @@ export default function Dashboard() {
   useEffect(() => {
     refreshAll()
     const interval = setInterval(refreshAll, 2 * 60 * 1000)
-    return () => clearInterval(interval)
+    const onRefresh = () => { refreshAll() }
+    window.addEventListener('dashboard:refresh', onRefresh)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('dashboard:refresh', onRefresh)
+    }
   }, [refreshAll])
 
   // ─────────────────────────────────────────────────────────────
