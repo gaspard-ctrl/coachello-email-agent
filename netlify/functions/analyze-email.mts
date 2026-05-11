@@ -7,7 +7,7 @@
 // ============================================================
 import type { Config } from '@netlify/functions';
 import { getDb, corsHeaders, jsonResponse, errorResponse } from './_db.js';
-import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead, getThreadHistory } from './_gmail.js';
+import { getGmailClient, extractBody, extractAttachments, getHeader, buildRawEmail, markAsRead, markAsUnread, getThreadHistory } from './_gmail.js';
 import { classifyAndDraftEmail } from './_claude.js';
 
 export default async function handler(req: Request) {
@@ -77,8 +77,11 @@ export default async function handler(req: Request) {
 
     const effectiveThreadId = threadId ?? msgRes.data.threadId ?? '';
 
-    // ── Ignorer les messages envoyés (label SENT) ──
+    // Capturer l'état "lu / non-lu" avant l'analyse pour le restaurer en non-lu après si besoin
     const labelIds = msgRes.data.labelIds ?? [];
+    const wasUnread = labelIds.includes('UNREAD');
+
+    // ── Ignorer les messages envoyés (label SENT) ──
     if (labelIds.includes('SENT')) {
       console.log(`[analyze-email] ⏭ Ignoré (label SENT) : ${gmailId}`);
       if (effectiveThreadId) await markAsRead(effectiveThreadId);
@@ -193,6 +196,13 @@ export default async function handler(req: Request) {
     }
 
     console.log(`[analyze-email] ✓ ${fromEmail} — ${subject} → ${result.classification}`);
+
+    // ── Si l'email était déjà lu, le repasser en non-lu pour qu'il apparaisse
+    //    comme actionnable dans l'inbox (puisque l'utilisateur a explicitement
+    //    demandé une analyse). ──
+    if (!wasUnread && effectiveThreadId) {
+      await markAsUnread(effectiveThreadId);
+    }
 
     // ── Recharger la row complète (avec body_html) pour le front ──
     const inserted = await db`

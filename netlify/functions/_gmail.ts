@@ -37,6 +37,25 @@ export async function markAsRead(threadId: string): Promise<boolean> {
   }
 }
 
+// Re-marquer un thread comme non lu (utile quand on analyse à la demande un mail déjà lu :
+// l'utilisateur veut le voir réapparaître comme actionnable dans l'inbox).
+export async function markAsUnread(threadId: string): Promise<boolean> {
+  try {
+    const gmail = getGmailClient();
+    await gmail.users.threads.modify({
+      userId: 'me',
+      id: threadId,
+      requestBody: { addLabelIds: ['UNREAD'] },
+    });
+    return true;
+  } catch (err: any) {
+    const status = err?.response?.status ?? err?.code ?? 'unknown';
+    const message = err?.response?.data?.error?.message ?? err?.message ?? '';
+    console.error(`[gmail] ✗ Échec markAsUnread(${threadId}) — HTTP ${status}: ${message}`);
+    return false;
+  }
+}
+
 // Décoder le corps d'un email (base64url → string)
 export function decodeBase64(encoded: string): string {
   const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
