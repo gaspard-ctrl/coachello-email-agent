@@ -20,13 +20,8 @@
 [functions."compose-email"]
   timeout = 26
 
-# analyze-email est devenu un endpoint DB-only (déclenche analyze-email-background)
-# → plus besoin de timeout étendu (DB SELECT rapide)
-
-# Background function : en prod 15 min par défaut, mais en local netlify-cli applique
-# le timeout de lambda-local. On force 120s pour laisser largement le temps à Claude.
-[functions."analyze-email-background"]
-  timeout = 120
+[functions."analyze-email"]
+  timeout = 26
 
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
