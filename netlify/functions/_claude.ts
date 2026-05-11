@@ -198,17 +198,8 @@ Classifie cet email et rédige un brouillon de réponse approprié.`;
   const model = await getConfiguredModel();
   const response = await client.messages.create({
     model,
-    // P95 réel des outputs = 546 tokens → 800 couvre 99% des cas et coupe
-    // la latence max de génération de ~12s à ~6s sur Haiku.
-    max_tokens: 800,
-    // Prompt caching (TTL 5 min) : le system prompt (guide + exemples + règles)
-    // est stable entre les appels. Cache hit = 90% économie input + latence
-    // divisée par ~3. Le 1er appel paye 1.25× (cache write).
-    // Cast `as any` car la version 0.32 de @anthropic-ai/sdk n'expose pas
-    // encore cache_control dans les types publics (l'API runtime le supporte).
-    system: [
-      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
-    ] as any,
+    max_tokens: 1500,
+    system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   });
 
