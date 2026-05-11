@@ -1,26 +1,19 @@
 // ============================================================
-// Helper partagé : connexion à la base PostgreSQL (Supabase)
+// Helper partagé : connexion à la base PostgreSQL (Supabase / Neon)
 // ============================================================
 import postgres from 'postgres';
 
 // Singleton — réutilise la même pool sur les invocations warm (évite le cold start DB à chaque requête)
 let _db: ReturnType<typeof postgres> | null = null;
-let _migrated = false;
 
 export function getDb() {
   if (!_db) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL manquant dans les variables d\'environnement');
-    _db = postgres(url, { ssl: 'require', max: 2, connect_timeout: 10, idle_timeout: 60 });
-  }
-  if (!_migrated) {
-    _migrated = true;
-    // Auto-migration idempotente : ajoute les colonnes ajoutées après le schema initial.
-    // Tourne une fois par cold start, en arrière-plan, sans bloquer l'appel courant.
-    void Promise.all([
-      _db`ALTER TABLE emails ADD COLUMN IF NOT EXISTS message_id VARCHAR(500)`,
-      _db`ALTER TABLE emails ADD COLUMN IF NOT EXISTS cc_emails  TEXT`,
-    ]).catch(err => console.error('[_db] auto-migration:', err));
+    // max=10 : laisse de la marge pour les Promise.all (3-5 queries concurrentes) sans
+    // saturer la pool. Auparavant max=2 + auto-migration au cold start saturait tout
+    // et bloquait analyze-email pendant ~30s sur sa toute première invocation.
+    _db = postgres(url, { ssl: 'require', max: 10, connect_timeout: 10, idle_timeout: 60 });
   }
   return _db;
 }
