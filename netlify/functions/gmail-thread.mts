@@ -4,7 +4,15 @@
 // ============================================================
 import type { Config } from '@netlify/functions';
 import { corsHeaders, jsonResponse, errorResponse } from './_db.js';
-import { getGmailClient, getHeader, extractBody } from './_gmail.js';
+import { getGmailClient, getHeader, extractBody, extractAttachments } from './_gmail.js';
+
+interface ThreadAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+  contentId?: string;
+}
 
 interface ThreadMessage {
   gmail_id: string;
@@ -18,6 +26,7 @@ interface ThreadMessage {
   body_html: string;
   is_me: boolean;
   is_unread: boolean;
+  attachments: ThreadAttachment[];
 }
 
 export default async function handler(req: Request) {
@@ -48,6 +57,7 @@ export default async function handler(req: Request) {
       const dateStr = getHeader(headers, 'Date');
       const date = dateStr ? new Date(dateStr).toISOString() : '';
       const { text, html } = extractBody(m.payload);
+      const atts = extractAttachments(m.payload);
       const labelIds: string[] = m.labelIds ?? [];
       // Détection "moi" : l'adresse env GMAIL_ADDRESS apparaît dans le From
       const fromLower = fromRaw.toLowerCase();
@@ -64,6 +74,7 @@ export default async function handler(req: Request) {
         body_html: html,
         is_me,
         is_unread: labelIds.includes('UNREAD'),
+        attachments: atts,
       };
     });
 

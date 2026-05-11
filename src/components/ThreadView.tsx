@@ -8,6 +8,14 @@ import DOMPurify from 'dompurify'
 import { apiGet } from '../lib/api'
 import { decodeHtmlEntities } from '../lib/htmlEntities'
 
+interface ThreadAttachment {
+  filename: string
+  mimeType: string
+  size: number
+  attachmentId: string
+  contentId?: string
+}
+
 interface ThreadMessage {
   gmail_id: string
   from: string
@@ -20,6 +28,13 @@ interface ThreadMessage {
   body_html: string
   is_me: boolean
   is_unread: boolean
+  attachments?: ThreadAttachment[]
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} o`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} Ko`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
 }
 
 function parseAddress(raw: string): { name: string; email: string } {
@@ -129,6 +144,36 @@ function MessageBlock({ msg, initiallyOpen }: { msg: ThreadMessage; initiallyOpe
             <div className="email-html-body" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
           ) : (
             <div className="whitespace-pre-wrap">{bodyText || decodeHtmlEntities(msg.snippet)}</div>
+          )}
+          {/* Pièces jointes du message — filtrer les images inline */}
+          {msg.attachments && msg.attachments.filter(a => !a.contentId || a.filename !== 'inline').length > 0 && (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {msg.attachments.filter(a => !a.contentId || a.filename !== 'inline').map((att, i) => {
+                const proxyUrl = `/api/attachment?gmailId=${encodeURIComponent(msg.gmail_id)}&attachmentId=${encodeURIComponent(att.attachmentId)}&mimeType=${encodeURIComponent(att.mimeType)}`
+                const isImage = att.mimeType.startsWith('image/')
+                const isPdf = att.mimeType === 'application/pdf'
+                const ext = att.filename.split('.').pop()?.toUpperCase() || '?'
+                return (
+                  <a
+                    key={i}
+                    href={proxyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-3 bg-white border border-[#EDE8E0] rounded-xl px-3 py-2.5 hover:bg-[#F7F5F2] hover:border-[#D8D0C5] transition-all"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-[#F5F0EA] flex items-center justify-center shrink-0">
+                      {isImage ? <span className="text-[10px] font-bold text-[#E8452A]">IMG</span>
+                        : isPdf ? <span className="text-[10px] font-bold text-red-500">PDF</span>
+                          : <span className="text-[9px] font-bold text-[#888]">{ext}</span>}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-[#444] truncate">{att.filename}</p>
+                      <p className="text-[10px] text-[#aaa]">{formatSize(att.size)}</p>
+                    </div>
+                  </a>
+                )
+              })}
+            </div>
           )}
         </div>
       )}

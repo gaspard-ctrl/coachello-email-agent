@@ -407,8 +407,8 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
               </div>
             )}
 
-            {/* Attachments */}
-            {fileAttachments.length > 0 && (
+            {/* Attachments (uniquement quand pas de thread — sinon affichées par ThreadView par message) */}
+            {!email.thread_id && fileAttachments.length > 0 && (
               <div>
                 <h3 className="text-[10px] font-bold text-[#bbb] uppercase tracking-widest mb-2">
                   Pièces jointes ({fileAttachments.length})
