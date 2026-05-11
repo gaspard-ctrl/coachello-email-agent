@@ -393,14 +393,14 @@ export default function Dashboard() {
     }
   }
 
-  const [trashingFaible, setTrashingFaible] = useState(false)
-  const handleTrashFaible = async () => {
+  const [readingFaible, setReadingFaible] = useState(false)
+  const handleReadFaible = async () => {
     const n = counts.FAIBLE
-    if (n === 0 || trashingFaible) return
-    if (!window.confirm(`Déplacer ${n} email${n > 1 ? 's' : ''} "Faible" dans la corbeille Gmail ?\n\nCette action retire les messages de l'inbox et les supprime de la DB locale. Récupérables depuis la corbeille Gmail pendant 30 j.`)) {
+    if (n === 0 || readingFaible) return
+    if (!window.confirm(`Marquer ${n} email${n > 1 ? 's' : ''} "Faible" comme lu${n > 1 ? 's' : ''} ?\n\nLes messages restent dans Gmail mais sortent de l'inbox (label UNREAD retiré) et sont retirés du dashboard.`)) {
       return
     }
-    setTrashingFaible(true)
+    setReadingFaible(true)
     // Retirer optimistement de la liste
     const targetGmailIds = new Set(enrichedInbox.filter(e => e.is_analyzed && e.classification === 'FAIBLE').map(e => e.gmail_id))
     setGmailEmails(prev => prev.filter(e => !targetGmailIds.has(e.gmail_id)))
@@ -410,19 +410,19 @@ export default function Dashboard() {
       return next
     })
     try {
-      const res = await apiPost<{ success: boolean; deleted?: number; failed?: number }>(
+      const res = await apiPost<{ success: boolean; updated?: number }>(
         '/bulk-action',
-        { action: 'trash', classification: 'FAIBLE' },
+        { action: 'mark-read', classification: 'FAIBLE' },
       )
-      setPollResult(`${res.deleted ?? 0} email(s) Faible supprimé(s)${res.failed ? ` (${res.failed} échec(s))` : ''}`)
+      setPollResult(`${res.updated ?? 0} email(s) Faible marqué(s) comme lu(s)`)
       setTimeout(() => setPollResult(null), 4000)
     } catch (err) {
-      setPollResult(`Erreur suppression : ${err instanceof Error ? err.message : 'inconnue'}`)
+      setPollResult(`Erreur : ${err instanceof Error ? err.message : 'inconnue'}`)
       setTimeout(() => setPollResult(null), 4000)
       // Re-fetch pour revert l'optimiste si échec
       refreshAll()
     }
-    setTrashingFaible(false)
+    setReadingFaible(false)
   }
 
   const handlePoll = async () => {
@@ -599,22 +599,22 @@ export default function Dashboard() {
           </button>
           {counts.FAIBLE > 0 && (
             <button
-              onClick={handleTrashFaible}
-              disabled={trashingFaible}
-              className="w-full px-3 py-2 rounded-xl font-medium text-[#888] border border-[#D8D0C5] hover:text-[#C23B2A] hover:border-[#C23B2A] hover:bg-[#FEE9E5] transition-colors disabled:opacity-40 text-[12px] flex items-center justify-center gap-1.5"
-              title="Déplacer tous les emails Faible dans la corbeille Gmail"
+              onClick={handleReadFaible}
+              disabled={readingFaible}
+              className="w-full px-3 py-2 rounded-xl font-medium text-[#888] border border-[#D8D0C5] hover:text-[#E8452A] hover:border-[#E8452A] hover:bg-[#FEE9E5] transition-colors disabled:opacity-40 text-[12px] flex items-center justify-center gap-1.5"
+              title="Marquer tous les emails Faible comme lus"
             >
-              {trashingFaible ? (
+              {readingFaible ? (
                 <>
                   <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-                  Suppression...
+                  Lecture...
                 </>
               ) : (
                 <>
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8M3 8l9-5 9 5" />
                   </svg>
-                  Supprimer Faible ({counts.FAIBLE})
+                  Read Faible ({counts.FAIBLE})
                 </>
               )}
             </button>
