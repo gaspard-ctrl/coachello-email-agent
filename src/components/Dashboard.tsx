@@ -173,12 +173,14 @@ export default function Dashboard() {
     // sur le filtre correspondant.
     const c: Record<Filter, number> = { all: 0, unread: 0, URGENT: 0, IMPORTANT: 0, NORMAL: 0, FAIBLE: 0, unanalyzed: 0, sent: 0 }
 
-    // Classifications → source = DB (analyzedEmails), comme filteredEmails.
+    // Classifications → uniquement les emails analysés ET non-lus dans Gmail.
+    // Source : enrichedInbox (qui contient l'état is_unread à jour depuis Gmail).
+    // Les emails analysés mais déjà lus disparaissent des catégories.
     const threadsByClass: Record<Classification, Set<string>> = {
       URGENT: new Set(), IMPORTANT: new Set(), NORMAL: new Set(), FAIBLE: new Set(),
     }
-    for (const e of analyzedEmails) {
-      if (!e.classification) continue
+    for (const e of enrichedInbox) {
+      if (!e.is_analyzed || !e.is_unread || !e.classification) continue
       const tid = e.thread_id || e.gmail_id
       threadsByClass[e.classification].add(tid)
     }
@@ -224,36 +226,10 @@ export default function Dashboard() {
       // Derniers envois Gmail
       list = sentEmails
     } else {
-      // Filtre par classification → on prend TOUS les emails analysés de la DB
-      // (peut inclure des emails hors page Gmail courante).
-      // On préfère la version "enrichedInbox" si l'email est dans la page (pour
-      // récupérer is_unread, snippet réel, etc.), sinon on convertit la row DB.
-      const inboxByGmailId = new Map(enrichedInbox.map(e => [e.gmail_id, e]))
-      list = analyzedEmails
-        .filter(e => e.classification === filter)
-        .map(e => {
-          const fromInbox = inboxByGmailId.get(e.gmail_id)
-          if (fromInbox) return fromInbox
-          // Fallback : on construit un GmailEmail à partir de la row DB
-          return {
-            gmail_id: e.gmail_id,
-            thread_id: e.thread_id,
-            folder: 'inbox' as const,
-            from_email: e.from_email,
-            from_name: e.from_name,
-            to_email: e.to_email,
-            to_name: '',
-            subject: e.subject || '(sans objet)',
-            snippet: e.body_preview ?? '',
-            received_at: e.received_at,
-            is_unread: true, // par défaut — la row DB ne stocke pas l'état Gmail
-            is_starred: false,
-            is_analyzed: true,
-            classification: e.classification,
-            email_db_id: e.id,
-            status: e.status,
-          } satisfies GmailEmail
-        })
+      // Filtre par classification → uniquement les emails analysés ET non-lus
+      // dans la page Gmail courante. Les emails analysés déjà lus n'apparaissent
+      // plus dans leur catégorie (cohérent avec les compteurs).
+      list = enrichedInbox.filter(e => e.is_analyzed && e.is_unread && e.classification === filter)
     }
 
     // Regroupement par thread_id : on garde le message le plus récent comme
