@@ -23,6 +23,9 @@
 [functions."analyze-email"]
   timeout = 26
 
+[functions."email-redraft"]
+  timeout = 26
+
 # ── Redirections API → Netlify Functions ──
 [[redirects]]
   from   = "/api/manual-poll"
@@ -51,7 +54,7 @@
 
 [[redirects]]
   from   = "/api/redraft"
-  to     = "/.netlify/functions/email-redraft-background"
+  to     = "/.netlify/functions/email-redraft"
   status = 200
 
 [[redirects]]
