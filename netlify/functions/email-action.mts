@@ -106,7 +106,7 @@ export default async function handler(req: Request) {
     // ACTION : reject
     // ──────────────────────────────────────────────────
     if (action === 'reject') {
-      const gmailOk = email.gmail_id ? await markAsRead(email.gmail_id) : true;
+      const gmailOk = email.thread_id ? await markAsRead(email.thread_id) : true;
 
       if (!isTmp) {
         if (gmailOk) {
@@ -196,13 +196,14 @@ export default async function handler(req: Request) {
         requestBody: { raw, threadId: email.thread_id },
       });
 
-      // Marquer le message envoyé comme lu
-      if (sendRes.data.id) {
-        await markAsRead(sendRes.data.id);
+      // Marquer le thread envoyé comme lu (markAsRead attend un thread_id, pas un message_id)
+      const sentThreadId = sendRes.data.threadId ?? email.thread_id;
+      if (sentThreadId) {
+        await markAsRead(sentThreadId);
       }
 
       // Marquer l'email original comme lu dans Gmail AVANT de toucher la DB
-      const gmailOk = await markAsRead(email.gmail_id);
+      const gmailOk = email.thread_id ? await markAsRead(email.thread_id) : false;
 
       // Si Gmail OK → supprimer de la DB. Sinon garder avec status='sent' pour ne pas réingérer.
       if (!isTmp) {
@@ -264,8 +265,8 @@ export default async function handler(req: Request) {
         },
       });
 
-      // Marquer comme lu dans Gmail d'abord
-      const gmailOk = await markAsRead(email.gmail_id);
+      // Marquer comme lu dans Gmail d'abord (markAsRead attend un thread_id)
+      const gmailOk = email.thread_id ? await markAsRead(email.thread_id) : false;
 
       if (!isTmp) {
         if (gmailOk) {

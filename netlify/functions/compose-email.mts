@@ -76,9 +76,9 @@ export default async function handler(req: Request) {
         requestBody: { raw },
       });
 
-      // Marquer comme lu pour ne pas le réingérer
-      if (sendRes.data.id) {
-        await markAsRead(sendRes.data.id);
+      // Marquer comme lu pour ne pas le réingérer (markAsRead attend un thread_id)
+      if (sendRes.data.threadId) {
+        await markAsRead(sendRes.data.threadId);
       }
 
       return jsonResponse({ success: true, action: 'sent', messageId: sendRes.data.id });
