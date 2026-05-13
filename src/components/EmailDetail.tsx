@@ -10,8 +10,8 @@ interface Props {
   onRefresh?: () => Promise<void>
   /** Si true, Claude est en train d'analyser cet email — spinner sur le brouillon. */
   analyzing?: boolean
-  /** Si fourni, l'email n'est pas encore analysé : on affiche un bouton "Analyser" au lieu du brouillon. */
-  onAnalyze?: () => void
+  /** Si fourni, l'email n'est pas encore analysé : on affiche une zone d'instructions + "Faire rédiger par Claude" au lieu du brouillon. */
+  onAnalyze?: (context?: string) => void
   /** Mode inline (utilisé dans Dashboard à côté de la liste). Sans ce flag, on rend en modal full-screen. */
   inline?: boolean
   /** Callback pour transférer l'email (ouvre Compose pré-rempli). */
@@ -498,15 +498,6 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
                 <h3 className="text-[11px] font-bold text-[#888] uppercase tracking-widest">Brouillon</h3>
               </div>
               <div className="flex items-center gap-3">
-                {!analyzing && onAnalyze && (
-                  <button
-                    onClick={onAnalyze}
-                    className="text-[11px] font-semibold text-[#E8452A] hover:text-[#c83a22] underline underline-offset-2 transition-colors"
-                    title="Demander à Claude de classifier et rédiger un brouillon"
-                  >
-                    ✨ Faire rédiger par Claude
-                  </button>
-                )}
                 {!analyzing && !onAnalyze && response.trim() && (
                   <button
                     onClick={() => setMode(mode === 'view' ? 'edit' : 'view')}
@@ -536,6 +527,27 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
                 className="flex-1 m-5 text-sm text-[#444] leading-relaxed border border-[#D8D0C5] rounded-xl p-3 resize-none focus:outline-none focus:ring-2 focus:ring-[#E8452A] bg-white"
                 placeholder={onAnalyze ? "Écris ta réponse… ou clique sur « Faire rédiger par Claude »" : "Réponse..."}
               />
+            )}
+
+            {/* Zone "Faire rédiger par Claude" avec instructions optionnelles — emails non analysés */}
+            {!analyzing && onAnalyze && (
+              <div className="border-t border-[#EDE8E0] p-3 flex items-center gap-2 bg-[#F7F5F2]/40 flex-shrink-0">
+                <input
+                  type="text"
+                  value={contextText}
+                  onChange={e => setContextText(e.target.value)}
+                  placeholder="Instructions pour Claude (optionnel)..."
+                  className="flex-1 min-w-0 text-[13px] border border-[#D8D0C5] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#E8452A] bg-white"
+                  onKeyDown={e => { if (e.key === 'Enter') { onAnalyze(contextText); setContextText('') } }}
+                />
+                <button
+                  onClick={() => { onAnalyze(contextText); setContextText('') }}
+                  className="btn-primary text-[12px] px-3 py-2 flex items-center gap-1.5 flex-shrink-0"
+                  title="Demander à Claude de classifier et rédiger un brouillon"
+                >
+                  ✨ Faire rédiger par Claude
+                </button>
+              </div>
             )}
 
             {/* Redraft avec instructions — réservé aux emails analysés (besoin d'une row DB) */}

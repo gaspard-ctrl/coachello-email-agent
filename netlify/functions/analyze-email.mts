@@ -23,6 +23,7 @@ export default async function handler(req: Request) {
     const body = await req.json().catch(() => ({}));
     const gmailId = body.gmail_id as string | undefined;
     const threadId = body.thread_id as string | undefined;
+    const userContext = typeof body.context === 'string' ? body.context.trim() : '';
 
     if (!gmailId) {
       return errorResponse('gmail_id requis', 400);
@@ -33,7 +34,8 @@ export default async function handler(req: Request) {
     const db = getDb();
 
     // ── 0. Court-circuit : si déjà en DB, on renvoie la row complète sans Claude ──
-    const exists = await db`SELECT id FROM emails WHERE gmail_id = ${gmailId} LIMIT 1` as any[];
+    //    (sauf si l'utilisateur a fourni des instructions spécifiques : on relance l'analyse)
+    const exists = userContext ? [] : await db`SELECT id FROM emails WHERE gmail_id = ${gmailId} LIMIT 1` as any[];
     if (exists.length > 0) {
       const fullRow = await db`
         SELECT id, gmail_id, thread_id, message_id, from_email, from_name, to_email, cc_emails, subject,
@@ -133,6 +135,7 @@ export default async function handler(req: Request) {
       subject,
       body: effectiveBody,
       threadHistory,
+      ...(userContext ? { context: userContext } : {}),
     });
 
     // ── Stocker en base (fallback progressif si colonnes manquantes) ──

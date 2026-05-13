@@ -68,23 +68,31 @@ export default function Dashboard() {
   const [usageData, setUsageData] = useState<any>(null)
   const [usageLoading, setUsageLoading] = useState(false)
 
+  // Recherche Gmail (transverse à toutes les pages — utilise q côté Gmail API)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+
   // ─────────────────────────────────────────────────────────────
   // Fetch helpers
   // ─────────────────────────────────────────────────────────────
   const fetchInbox = useCallback(async () => {
     try {
-      const data = await apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>('/gmail-inbox?folder=inbox&limit=50')
+      const qs = search ? `&search=${encodeURIComponent(search)}` : ''
+      const data = await apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(`/gmail-inbox?folder=inbox&limit=50${qs}`)
       setGmailEmails(data.emails)
       setNextPageToken(data.nextPageToken)
-      inboxCache.gmailEmails = data.emails
-      inboxCache.nextPageToken = data.nextPageToken
+      // Le cache n'est pertinent que pour l'inbox normale (pas de recherche active)
+      if (!search) {
+        inboxCache.gmailEmails = data.emails
+        inboxCache.nextPageToken = data.nextPageToken
+      }
       setLastRefresh(new Date())
     } catch (err) {
       console.error('Erreur fetchInbox:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [search])
 
   const fetchAnalyzed = useCallback(async () => {
     try {
@@ -306,13 +314,17 @@ export default function Dashboard() {
     })
   }
 
-  const runAnalysis = async () => {
+  const runAnalysis = async (context?: string) => {
     if (!selectedEmail) return
     setAnalyzing(true)
     try {
       const res = await apiPost<{ success: boolean; email?: Email; skipped?: boolean; reason?: string }>(
         '/analyze-email',
-        { gmail_id: selectedEmail.gmail_id, thread_id: selectedEmail.thread_id },
+        {
+          gmail_id: selectedEmail.gmail_id,
+          thread_id: selectedEmail.thread_id,
+          ...(context && context.trim() ? { context: context.trim() } : {}),
+        },
       )
       if (res.email) {
         setSelectedEmail(res.email)
@@ -411,14 +423,17 @@ export default function Dashboard() {
     if (!nextPageToken || loadingMore) return
     setLoadingMore(true)
     try {
+      const qs = search ? `&search=${encodeURIComponent(search)}` : ''
       const data = await apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(
-        `/gmail-inbox?folder=inbox&limit=50&pageToken=${encodeURIComponent(nextPageToken)}`,
+        `/gmail-inbox?folder=inbox&limit=50&pageToken=${encodeURIComponent(nextPageToken)}${qs}`,
       )
       const next = [...gmailEmails, ...data.emails]
       setGmailEmails(next)
       setNextPageToken(data.nextPageToken)
-      inboxCache.gmailEmails = next
-      inboxCache.nextPageToken = data.nextPageToken
+      if (!search) {
+        inboxCache.gmailEmails = next
+        inboxCache.nextPageToken = data.nextPageToken
+      }
     } catch (err) {
       console.error('Erreur loadMore:', err)
     } finally {
@@ -690,16 +705,54 @@ export default function Dashboard() {
       <main className="flex-1 min-w-0 bg-white border border-[#EDE8E0] rounded-2xl overflow-hidden flex">
         {/* Liste (rétrécit quand un email est ouvert) */}
         <div
-          className={`overflow-y-auto border-r border-[#EDE8E0] ${selectedEmail ? 'shrink-0 basis-[317px] grow-[317] min-w-[280px]' : 'flex-1'}`}
+          className={`flex flex-col border-r border-[#EDE8E0] ${selectedEmail ? 'shrink-0 basis-[317px] grow-[317] min-w-[280px]' : 'flex-1'}`}
         >
-          <EmailList
-            emails={filteredEmails}
-            loading={loading || loadingMore}
-            onSelect={handleSelect}
-            onLoadMore={handleLoadMore}
-            hasMore={filter === 'all' && !!nextPageToken}
-            onToggleRead={handleToggleRead}
-          />
+          {/* Barre de recherche Gmail (transverse à toutes les pages) */}
+          <div className="flex-shrink-0 px-3 py-2 border-b border-[#EDE8E0] bg-white">
+            <form
+              onSubmit={e => { e.preventDefault(); setSearch(searchInput.trim()) }}
+              className="flex items-center gap-1.5 bg-[#F5F0EA] rounded-full px-3 py-1.5 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#E8452A]"
+            >
+              <svg className="w-4 h-4 text-[#888] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+              </svg>
+              <input
+                type="text"
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                placeholder="Rechercher dans Gmail (toutes les pages)..."
+                className="flex-1 min-w-0 bg-transparent text-[13px] focus:outline-none placeholder:text-[#aaa]"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => { setSearchInput(''); setSearch('') }}
+                  className="text-[#aaa] hover:text-[#E8452A] flex-shrink-0 p-0.5"
+                  title="Effacer la recherche"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </form>
+            {search && (
+              <p className="text-[10.5px] text-[#888] mt-1 px-2">
+                Recherche : « <span className="font-medium text-[#555]">{search}</span> » — résultats sur l'ensemble de Gmail
+              </p>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            <EmailList
+              emails={filteredEmails}
+              loading={loading || loadingMore}
+              onSelect={handleSelect}
+              onLoadMore={handleLoadMore}
+              hasMore={(filter === 'all' || !!search) && !!nextPageToken}
+              onToggleRead={handleToggleRead}
+            />
+          </div>
         </div>
 
         {/* EmailDetail inline (uniquement quand un email est sélectionné) */}
