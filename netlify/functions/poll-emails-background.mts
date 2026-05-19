@@ -10,7 +10,7 @@ import { classifyAndDraftEmail } from './_claude.js';
 export default async function handler(req: Request) {
   const gmail = getGmailClient();
   const gmailAddress = (process.env.GMAIL_ADDRESS ?? '').toLowerCase();
-  const excludeSelf = gmailAddress ? `in:inbox is:unread -from:me -from:${gmailAddress} newer_than:3d` : 'in:inbox is:unread -from:me newer_than:3d';
+  const excludeSelf = gmailAddress ? `in:inbox is:unread -from:me -from:${gmailAddress}` : 'in:inbox is:unread -from:me';
 
   // ── Mode compteur : retourne le nombre réel de mails non lus ──
   if (new URL(req.url).searchParams.get('count') === 'true') {
@@ -18,7 +18,7 @@ export default async function handler(req: Request) {
       const listRes = await gmail.users.messages.list({
         userId: 'me',
         q: excludeSelf,
-        maxResults: 50,
+        maxResults: 500,
       });
       return jsonResponse({ count: listRes.data.messages?.length ?? 0 });
     } catch (err) {
@@ -55,7 +55,7 @@ export default async function handler(req: Request) {
     const listRes = await gmail.users.messages.list({
       userId: 'me',
       q: excludeSelf,
-      maxResults: 20,
+      maxResults: 500,
     });
 
     const messages = listRes.data.messages ?? [];

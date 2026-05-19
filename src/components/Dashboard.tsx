@@ -705,7 +705,7 @@ export default function Dashboard() {
       <main className="flex-1 min-w-0 bg-white border border-[#EDE8E0] rounded-2xl overflow-hidden flex">
         {/* Liste (rétrécit quand un email est ouvert) */}
         <div
-          className={`flex flex-col border-r border-[#EDE8E0] ${selectedEmail ? 'shrink-0 basis-[317px] grow-[317] min-w-[280px]' : 'flex-1'}`}
+          className={`flex flex-col border-r border-[#EDE8E0] min-w-0 ${selectedEmail ? 'shrink-0 basis-[317px] grow-[317] min-w-[280px]' : 'flex-1'}`}
         >
           {/* Barre de recherche Gmail (transverse à toutes les pages) */}
           <div className="flex-shrink-0 px-3 py-2 border-b border-[#EDE8E0] bg-white">
@@ -743,7 +743,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
             <EmailList
               emails={filteredEmails}
               loading={loading || loadingMore}

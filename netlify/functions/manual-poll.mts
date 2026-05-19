@@ -72,7 +72,7 @@ export default async function handler(req: Request) {
     const listRes = await gmail.users.messages.list({
       userId: 'me',
       q: excludeSelf,
-      maxResults: 20,
+      maxResults: 500,
     });
 
     const messages = listRes.data.messages ?? [];
