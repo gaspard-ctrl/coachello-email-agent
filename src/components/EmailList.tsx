@@ -91,7 +91,7 @@ export default function EmailList({
             tabIndex={0}
             onClick={() => onSelect(email)}
             onKeyDown={e => { if (e.key === 'Enter') onSelect(email) }}
-            className={`w-full text-left flex items-center gap-3 px-4 py-2.5 border-b border-[#EDE8E0] transition-colors group cursor-pointer overflow-hidden ${
+            className={`w-full text-left flex items-center gap-3 px-4 py-2.5 border-b border-[#EDE8E0] transition-colors group cursor-pointer ${
               isUnread ? 'bg-white hover:bg-[#FEE9E5]/30' : 'bg-[#F7F5F2]/40 hover:bg-[#F0EDE8]'
             }`}
           >
@@ -179,7 +179,7 @@ export default function EmailList({
               <button
                 onClick={e => { e.stopPropagation(); onToggleRead(email.gmail_id, isUnread) }}
                 title={isUnread ? 'Marquer comme lu' : 'Marquer comme non lu'}
-                className="flex-shrink-0 p-1.5 rounded-md text-[#ccc] hover:text-[#E8452A] hover:bg-[#F5F0EA] opacity-60 group-hover:opacity-100 transition-all"
+                className="flex-shrink-0 p-1.5 rounded-md text-[#888] hover:text-[#E8452A] hover:bg-[#F5F0EA] transition-all"
               >
                 {isUnread ? (
                   // Enveloppe ouverte = "marquer comme lu"

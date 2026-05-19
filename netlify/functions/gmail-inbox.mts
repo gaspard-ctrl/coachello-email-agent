@@ -58,7 +58,7 @@ export default async function handler(req: Request) {
   try {
     const url = new URL(req.url);
     const folder = (url.searchParams.get('folder') ?? 'inbox') as 'inbox' | 'sent' | 'drafts';
-    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 100);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 200);
     const pageToken = url.searchParams.get('pageToken') ?? undefined;
     const search = (url.searchParams.get('search') ?? '').trim();
 

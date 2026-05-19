@@ -78,14 +78,36 @@ export default function Dashboard() {
   const fetchInbox = useCallback(async () => {
     try {
       const qs = search ? `&search=${encodeURIComponent(search)}` : ''
-      const data = await apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(`/gmail-inbox?folder=inbox&limit=50${qs}`)
-      setGmailEmails(data.emails)
-      setNextPageToken(data.nextPageToken)
-      // Le cache n'est pertinent que pour l'inbox normale (pas de recherche active)
-      if (!search) {
-        inboxCache.gmailEmails = data.emails
-        inboxCache.nextPageToken = data.nextPageToken
-      }
+      // Fetch en parallèle :
+      //  - inbox normale (1re page) : pour le filtre "Tous" et la pagination
+      //  - tous les non-lus (jusqu'à 200) : pour que "Non lues" affiche tout
+      //    et que les compteurs par classification couvrent tous les non-lus.
+      const [normalData, unreadData] = await Promise.all([
+        apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(`/gmail-inbox?folder=inbox&limit=50${qs}`),
+        search
+          ? Promise.resolve({ emails: [] as GmailEmail[], nextPageToken: null })
+          : apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(`/gmail-inbox?folder=inbox&search=is%3Aunread&limit=200`)
+              .catch(() => ({ emails: [] as GmailEmail[], nextPageToken: null })),
+      ])
+      setGmailEmails(prev => {
+        const byId = new Map<string, GmailEmail>()
+        for (const e of normalData.emails) byId.set(e.gmail_id, e)
+        for (const e of unreadData.emails) if (!byId.has(e.gmail_id)) byId.set(e.gmail_id, e)
+        // Conserver les pages déjà chargées via "Charger plus" pour les emails LUS.
+        // (Les non-lus sont déjà tous présents dans unreadData ; conserver leur
+        // ancienne version risquerait de garder un is_unread périmé.)
+        for (const e of prev) {
+          if (!byId.has(e.gmail_id) && !e.is_unread) byId.set(e.gmail_id, e)
+        }
+        const merged = Array.from(byId.values())
+          .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
+        if (!search) {
+          inboxCache.gmailEmails = merged
+          inboxCache.nextPageToken = normalData.nextPageToken
+        }
+        return merged
+      })
+      setNextPageToken(normalData.nextPageToken)
       setLastRefresh(new Date())
     } catch (err) {
       console.error('Erreur fetchInbox:', err)
@@ -427,13 +449,18 @@ export default function Dashboard() {
       const data = await apiGet<{ emails: GmailEmail[]; nextPageToken: string | null }>(
         `/gmail-inbox?folder=inbox&limit=50&pageToken=${encodeURIComponent(nextPageToken)}${qs}`,
       )
-      const next = [...gmailEmails, ...data.emails]
-      setGmailEmails(next)
+      setGmailEmails(prev => {
+        const byId = new Map(prev.map(e => [e.gmail_id, e]))
+        for (const e of data.emails) if (!byId.has(e.gmail_id)) byId.set(e.gmail_id, e)
+        const next = Array.from(byId.values())
+          .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
+        if (!search) {
+          inboxCache.gmailEmails = next
+          inboxCache.nextPageToken = data.nextPageToken
+        }
+        return next
+      })
       setNextPageToken(data.nextPageToken)
-      if (!search) {
-        inboxCache.gmailEmails = next
-        inboxCache.nextPageToken = data.nextPageToken
-      }
     } catch (err) {
       console.error('Erreur loadMore:', err)
     } finally {
