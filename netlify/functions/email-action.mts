@@ -13,6 +13,42 @@ function extractEmail(addr: string): string {
   return (match ? match[1] : addr).toLowerCase().trim();
 }
 
+// Construit les champs To / Cc / In-Reply-To d'une réponse.
+// Par défaut on répond au mail ingéré ; si `override` est fourni, on répond
+// à un message précis du thread (son expéditeur devient le destinataire).
+async function buildReplyParams(opts: {
+  gmail: any;
+  senderEmail: string;
+  email: any;
+  override: { from: string; to: string; cc: string; gmail_id: string } | null;
+}): Promise<{ to: string; cc?: string; inReplyTo?: string }> {
+  const { gmail, senderEmail, email, override } = opts;
+  const toAddr = override ? (override.from || email.from_email) : email.from_email;
+  const replyGmailId = override ? override.gmail_id : email.gmail_id;
+
+  // Message-ID de l'email cible (pour In-Reply-To / References)
+  let inReplyTo: string | undefined = (!override && email.message_id) ? email.message_id : undefined;
+  if (!inReplyTo && replyGmailId) {
+    try {
+      const orig = await gmail.users.messages.get({
+        userId: 'me', id: replyGmailId, format: 'metadata', metadataHeaders: ['Message-ID'],
+      });
+      inReplyTo = orig.data.payload?.headers?.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value || undefined;
+    } catch { /* silencieux */ }
+  }
+
+  // Reply All : Cc = (To + Cc du message cible) sauf nous-mêmes et sauf le destinataire
+  const recipientEmail = extractEmail(toAddr);
+  const srcTo = override ? override.to : (email.to_email ?? '');
+  const srcCc = override ? override.cc : (email.cc_emails ?? '');
+  const keep = (s: string) => !!s && extractEmail(s) !== senderEmail && extractEmail(s) !== recipientEmail;
+  const ccTo = (srcTo ?? '').split(',').map((s: string) => s.trim()).filter(keep);
+  const ccCc = (srcCc ?? '').split(',').map((s: string) => s.trim()).filter(keep);
+  const cc = [...ccTo, ...ccCc].join(', ') || undefined;
+
+  return { to: toAddr, cc, inReplyTo };
+}
+
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -41,12 +77,25 @@ export default async function handler(req: Request) {
       gmail_id: bodyGmailId, thread_id: bodyThreadId,
       from_email: bodyFromEmail, to_email: bodyToEmail,
       cc_emails: bodyCcEmails, subject: bodySubject,
+      // Override "répondre à un message précis du thread" (pas seulement le dernier)
+      reply_from: bodyReplyFrom, reply_to: bodyReplyTo,
+      reply_cc: bodyReplyCc, reply_gmail_id: bodyReplyGmailId,
     } = body as {
       user?: string; final_response?: string; attachments?: OutgoingAttachment[];
       gmail_id?: string; thread_id?: string;
       from_email?: string; to_email?: string;
       cc_emails?: string; subject?: string;
+      reply_from?: string; reply_to?: string;
+      reply_cc?: string; reply_gmail_id?: string;
     };
+
+    // Cible de réponse : par défaut le mail ingéré, ou un message précis du thread si fourni.
+    const replyOverride = bodyReplyGmailId ? {
+      from:     bodyReplyFrom ?? '',
+      to:       bodyReplyTo ?? '',
+      cc:       bodyReplyCc ?? '',
+      gmail_id: bodyReplyGmailId,
+    } : null;
 
     // ── Récupérer l'email ──
     // Cas 1 : email tmp-* (non analysé, pas de row DB) → construire depuis le body
@@ -162,29 +211,14 @@ export default async function handler(req: Request) {
       const gmail       = getGmailClient();
       const senderEmail = (process.env.GMAIL_ADDRESS ?? 'contact@coachello.io').toLowerCase();
 
-      // Récupérer le Message-ID de l'email original depuis Gmail (pour In-Reply-To)
-      let inReplyTo: string | undefined = email.message_id || undefined;
-      if (!inReplyTo && email.gmail_id) {
-        try {
-          const orig = await gmail.users.messages.get({
-            userId: 'me', id: email.gmail_id, format: 'metadata',
-            metadataHeaders: ['Message-ID'],
-          });
-          inReplyTo = orig.data.payload?.headers?.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value || undefined;
-        } catch { /* silencieux */ }
-      }
-
-      // Reply All : CC = destinataires originaux (To + Cc) sauf notre propre adresse
-      const originalTo = (email.to_email ?? '').split(',').map((s: string) => s.trim()).filter((s: string) => s && extractEmail(s) !== senderEmail);
-      const originalCc = (email.cc_emails ?? '').split(',').map((s: string) => s.trim()).filter((s: string) => s && extractEmail(s) !== senderEmail);
-      const ccList     = [...originalTo, ...originalCc].join(', ') || undefined;
+      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride });
 
       const raw = buildRawEmail({
-        to:         email.from_email,
+        to,
         from:       senderEmail,
         subject:    email.subject,
         body:       responseText,
-        cc:         ccList,
+        cc,
         threadId:   email.thread_id,
         inReplyTo,
         attachments: reqAttachments,
@@ -232,27 +266,14 @@ export default async function handler(req: Request) {
       const gmail       = getGmailClient();
       const senderEmail = (process.env.GMAIL_ADDRESS ?? 'contact@coachello.io').toLowerCase();
 
-      let inReplyTo: string | undefined = email.message_id || undefined;
-      if (!inReplyTo && email.gmail_id) {
-        try {
-          const orig = await gmail.users.messages.get({
-            userId: 'me', id: email.gmail_id, format: 'metadata',
-            metadataHeaders: ['Message-ID'],
-          });
-          inReplyTo = orig.data.payload?.headers?.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value || undefined;
-        } catch { /* silencieux */ }
-      }
-
-      const originalTo = (email.to_email ?? '').split(',').map((s: string) => s.trim()).filter((s: string) => s && extractEmail(s) !== senderEmail);
-      const originalCc = (email.cc_emails ?? '').split(',').map((s: string) => s.trim()).filter((s: string) => s && extractEmail(s) !== senderEmail);
-      const ccList     = [...originalTo, ...originalCc].join(', ') || undefined;
+      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride });
 
       const raw = buildRawEmail({
-        to:        email.from_email,
+        to,
         from:      senderEmail,
         subject:   email.subject,
         body:      responseText,
-        cc:        ccList,
+        cc,
         threadId:  email.thread_id,
         inReplyTo,
         attachments: reqAttachments,

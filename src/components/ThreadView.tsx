@@ -31,6 +31,16 @@ interface ThreadMessage {
   attachments?: ThreadAttachment[]
 }
 
+// Cible de réponse choisie dans le thread (pour répondre à un message précis,
+// pas seulement au dernier arrivé).
+export interface ReplyTarget {
+  gmail_id: string
+  from: string
+  to: string
+  cc?: string
+  name: string
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} o`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} Ko`
@@ -105,7 +115,13 @@ function buildAttachmentUrl(gmailId: string, att: ThreadAttachment, opts: { down
   return `/api/attachment?${params.toString()}`
 }
 
-function MessageBlock({ msg, initiallyOpen, onPreview }: { msg: ThreadMessage; initiallyOpen: boolean; onPreview: (a: { url: string; filename: string; mimeType: string }) => void }) {
+function MessageBlock({ msg, initiallyOpen, onPreview, onReply, isActiveReply }: {
+  msg: ThreadMessage
+  initiallyOpen: boolean
+  onPreview: (a: { url: string; filename: string; mimeType: string }) => void
+  onReply?: (t: ReplyTarget) => void
+  isActiveReply?: boolean
+}) {
   const [open, setOpen] = useState(initiallyOpen)
   const [showDetails, setShowDetails] = useState(false)
   const { name, email } = parseAddress(msg.from)
@@ -165,6 +181,23 @@ function MessageBlock({ msg, initiallyOpen, onPreview }: { msg: ThreadMessage; i
           ) : (
             <div className="whitespace-pre-wrap">{bodyText || decodeHtmlEntities(msg.snippet)}</div>
           )}
+          {/* Choisir ce message comme cible de réponse */}
+          {onReply && !msg.is_me && (
+            <button
+              onClick={() => onReply({ gmail_id: msg.gmail_id, from: msg.from, to: msg.to, cc: msg.cc, name: name || email })}
+              className={`mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                isActiveReply
+                  ? 'bg-[#FEE9E5] text-[#E8452A] border-[#F5C4BB]'
+                  : 'text-[#888] border-[#EDE8E0] hover:text-[#E8452A] hover:border-[#F5C4BB] hover:bg-[#FEF6F4]'
+              }`}
+              title={`Répondre à ${name || email}`}
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10l6-6m-6 6l6 6m-6-6h10a8 8 0 018 8v2" />
+              </svg>
+              {isActiveReply ? 'Réponse à ce message' : 'Répondre à ce message'}
+            </button>
+          )}
           {/* Pièces jointes du message — filtrer les images inline */}
           {msg.attachments && msg.attachments.filter(a => !a.contentId || a.filename !== 'inline').length > 0 && (
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -221,7 +254,12 @@ function MessageBlock({ msg, initiallyOpen, onPreview }: { msg: ThreadMessage; i
   )
 }
 
-export default function ThreadView({ threadId, latestGmailId }: { threadId: string; latestGmailId?: string }) {
+export default function ThreadView({ threadId, latestGmailId, onReply, activeReplyGmailId }: {
+  threadId: string
+  latestGmailId?: string
+  onReply?: (t: ReplyTarget) => void
+  activeReplyGmailId?: string
+}) {
   const [messages, setMessages] = useState<ThreadMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewAtt, setPreviewAtt] = useState<{ url: string; filename: string; mimeType: string } | null>(null)
@@ -262,7 +300,7 @@ export default function ThreadView({ threadId, latestGmailId }: { threadId: stri
         const isLatest = latestGmailId ? msg.gmail_id === latestGmailId : idx === 0
         const onlyOne = ordered.length === 1
         const initiallyOpen = onlyOne || isLatest
-        return <MessageBlock key={msg.gmail_id} msg={msg} initiallyOpen={initiallyOpen} onPreview={setPreviewAtt} />
+        return <MessageBlock key={msg.gmail_id} msg={msg} initiallyOpen={initiallyOpen} onPreview={setPreviewAtt} onReply={onReply} isActiveReply={activeReplyGmailId === msg.gmail_id} />
       })}
 
       {previewAtt && (

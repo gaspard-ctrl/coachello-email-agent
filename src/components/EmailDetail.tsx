@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import DOMPurify from 'dompurify'
 import { Email, EmailAttachment, CLASSIFICATION_CONFIG } from '../types'
-import ThreadView from './ThreadView'
+import ThreadView, { ReplyTarget } from './ThreadView'
 
 interface Props {
   email: Email
@@ -137,6 +137,9 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
   const [contextText, setContextText] = useState('')
   const [redraftLoading, setRedraftLoading] = useState(false)
 
+  // Cible de réponse : null = dernier message (comportement par défaut), sinon un message précis du thread.
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null)
+
   const [previewAtt, setPreviewAtt] = useState<{ url: string; filename: string; mimeType: string } | null>(null)
   const [openPrev, setOpenPrev] = useState<Record<number, boolean>>({ 0: true })
   const [detailsPrev, setDetailsPrev] = useState<Record<number, boolean>>({})
@@ -171,6 +174,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
   // Quand l'email change (notamment après une analyse), recharger le brouillon
   useEffect(() => {
     setResponse(email.draft_response ?? '')
+    setReplyTarget(null)
   }, [email.id, email.draft_response])
 
   // Lock à l'ouverture, unlock à la fermeture (sauf en mode analyzing — pas d'id DB stable)
@@ -242,6 +246,14 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
     subject:    email.subject,
   } : undefined
 
+  // Override "répondre à un message précis du thread" envoyé au backend.
+  const replyOverride = replyTarget ? {
+    reply_from:      replyTarget.from,
+    reply_to:        replyTarget.to,
+    reply_cc:        replyTarget.cc ?? '',
+    reply_gmail_id:  replyTarget.gmail_id,
+  } : undefined
+
   const sendAction = async (action: 'validate' | 'reject' | 'draft' | 'report') => {
     setLoading(true)
     setFeedback(null)
@@ -250,7 +262,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
       const res = await fetch(`/api/emails/${email.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}) }),
+        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Erreur')
@@ -272,7 +284,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
       const atts = outgoingFiles.length > 0 ? await convertFilesToBase64(outgoingFiles) : undefined
       const res = await fetch(`/api/emails/${email.id}/validate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}) }),
+        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Erreur lors de l'envoi")
@@ -350,7 +362,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
           {/* Thread + attachments — scrollable */}
           <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
             {email.thread_id ? (
-              <ThreadView threadId={email.thread_id} latestGmailId={email.gmail_id} />
+              <ThreadView threadId={email.thread_id} latestGmailId={email.gmail_id} onReply={setReplyTarget} activeReplyGmailId={replyTarget?.gmail_id} />
             ) : sanitizedHtml ? (
               <div ref={htmlRef} className="text-[14px] text-[#444] leading-relaxed email-html-body" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
             ) : (
@@ -508,6 +520,27 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
                 )}
               </div>
             </div>
+
+            {/* Destinataire de la réponse (modifiable via "Répondre à ce message" dans le thread) */}
+            {!analyzing && email.thread_id && (
+              <div className="px-5 pb-1 flex items-center gap-1.5 flex-shrink-0 text-[12px] min-w-0">
+                <span className="text-[#aaa] flex-shrink-0">À :</span>
+                <span className="font-medium text-[#444] truncate" title={replyTarget ? replyTarget.from : email.from_email}>
+                  {replyTarget ? replyTarget.name : (email.from_name || email.from_email)}
+                </span>
+                {replyTarget ? (
+                  <button
+                    onClick={() => setReplyTarget(null)}
+                    className="text-[11px] text-[#aaa] hover:text-[#E8452A] underline underline-offset-2 transition-colors flex-shrink-0 ml-1"
+                    title="Revenir au dernier message du thread"
+                  >
+                    revenir au dernier message
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-[#bbb] flex-shrink-0 ml-1">(dernier message · « Répondre à ce message » dans le fil pour changer)</span>
+                )}
+              </div>
+            )}
 
             {/* Zone de brouillon (analyse en cours / éditeur) */}
             {analyzing ? (
