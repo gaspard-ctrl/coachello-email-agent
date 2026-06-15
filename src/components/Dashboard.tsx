@@ -374,14 +374,30 @@ export default function Dashboard() {
     refreshAll()
   }
 
-  const handleForward = (e: Email) => {
+  const handleForward = async (e: Email) => {
     const fromLine = e.from_name ? `${e.from_name} <${e.from_email}>` : e.from_email
     const dateLine = new Date(e.received_at).toLocaleString('fr-FR', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     })
     const subj = e.subject || '(sans objet)'
-    const originalBody = e.body_text || e.body_preview || ''
+    let originalBody = e.body_text || e.body_preview || ''
+    // Le body peut n'être qu'un extrait (snippet Gmail) quand l'email vient
+    // d'une recherche non analysée : on récupère alors le corps complet du
+    // message via le thread, sinon le forward n'embarque que la 1re phrase.
+    const looksLikeSnippet = !e.body_text || e.body_text === e.body_preview
+    if (looksLikeSnippet && e.thread_id) {
+      try {
+        const data = await apiGet<{ messages: { gmail_id: string; body_text: string }[] }>(
+          `/gmail-thread?id=${encodeURIComponent(e.thread_id)}`,
+        )
+        const msg = data.messages.find(m => m.gmail_id === e.gmail_id)
+          ?? data.messages[data.messages.length - 1]
+        if (msg?.body_text) originalBody = msg.body_text
+      } catch {
+        // On garde l'extrait en fallback si la récupération échoue.
+      }
+    }
     const fwdSubject = /^fwd?\s*:/i.test(subj) ? subj : `Fwd: ${subj}`
     const fwdBody = [
       '',
