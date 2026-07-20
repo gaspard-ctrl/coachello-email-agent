@@ -28,6 +28,9 @@ export default async function handler(req: Request) {
     const rows = await db`SELECT key, value FROM settings`;
     const settings: Record<string, string> = {};
     for (const r of rows as any[]) settings[r.key] = r.value;
+    // Adresse de la boîte gérée (env) — exposée pour que le front sache "qui est moi"
+    // (ex : exclure notre propre adresse des destinataires en Cc d'une réponse).
+    settings.gmail_address = (process.env.GMAIL_ADDRESS ?? '').toLowerCase();
     return jsonResponse({ settings });
   }
 

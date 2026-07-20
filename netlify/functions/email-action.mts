@@ -21,8 +21,10 @@ async function buildReplyParams(opts: {
   senderEmail: string;
   email: any;
   override: { from: string; to: string; cc: string; gmail_id: string } | null;
+  /** Cc explicite fourni par le front (liste éditée dans l'UI). Si défini (même ""), il remplace le Cc auto reply-all. */
+  ccOverride?: string;
 }): Promise<{ to: string; cc?: string; inReplyTo?: string }> {
-  const { gmail, senderEmail, email, override } = opts;
+  const { gmail, senderEmail, email, override, ccOverride } = opts;
   const toAddr = override ? (override.from || email.from_email) : email.from_email;
   const replyGmailId = override ? override.gmail_id : email.gmail_id;
 
@@ -37,14 +39,20 @@ async function buildReplyParams(opts: {
     } catch { /* silencieux */ }
   }
 
-  // Reply All : Cc = (To + Cc du message cible) sauf nous-mêmes et sauf le destinataire
+  // Cc : soit la liste explicite éditée dans l'UI (ccOverride), soit le reply-all auto.
+  // Dans les deux cas on retire notre propre adresse et le destinataire principal, et on dédoublonne.
   const recipientEmail = extractEmail(toAddr);
-  const srcTo = override ? override.to : (email.to_email ?? '');
-  const srcCc = override ? override.cc : (email.cc_emails ?? '');
   const keep = (s: string) => !!s && extractEmail(s) !== senderEmail && extractEmail(s) !== recipientEmail;
-  const ccTo = (srcTo ?? '').split(',').map((s: string) => s.trim()).filter(keep);
-  const ccCc = (srcCc ?? '').split(',').map((s: string) => s.trim()).filter(keep);
-  const cc = [...ccTo, ...ccCc].join(', ') || undefined;
+  const sources = ccOverride !== undefined
+    ? [ccOverride]                                              // Cc éditée par l'utilisateur
+    : [override ? override.to : (email.to_email ?? ''),         // reply-all : To + Cc du message cible
+       override ? override.cc : (email.cc_emails ?? '')];
+  const seen = new Set<string>();
+  const ccList = sources
+    .flatMap(src => (src ?? '').split(',').map((s: string) => s.trim()))
+    .filter(keep)
+    .filter(s => { const e = extractEmail(s); if (seen.has(e)) return false; seen.add(e); return true; });
+  const cc = ccList.join(', ') || undefined;
 
   return { to: toAddr, cc, inReplyTo };
 }
@@ -80,6 +88,8 @@ export default async function handler(req: Request) {
       // Override "répondre à un message précis du thread" (pas seulement le dernier)
       reply_from: bodyReplyFrom, reply_to: bodyReplyTo,
       reply_cc: bodyReplyCc, reply_gmail_id: bodyReplyGmailId,
+      // Liste Cc explicite éditée dans l'UI (chips + ajouts). undefined = comportement auto reply-all.
+      cc_override: bodyCcOverride,
     } = body as {
       user?: string; final_response?: string; attachments?: OutgoingAttachment[];
       gmail_id?: string; thread_id?: string;
@@ -87,6 +97,7 @@ export default async function handler(req: Request) {
       cc_emails?: string; subject?: string;
       reply_from?: string; reply_to?: string;
       reply_cc?: string; reply_gmail_id?: string;
+      cc_override?: string;
     };
 
     // Cible de réponse : par défaut le mail ingéré, ou un message précis du thread si fourni.
@@ -211,7 +222,7 @@ export default async function handler(req: Request) {
       const gmail       = getGmailClient();
       const senderEmail = (process.env.GMAIL_ADDRESS ?? 'contact@coachello.io').toLowerCase();
 
-      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride });
+      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride, ccOverride: bodyCcOverride });
 
       const raw = buildRawEmail({
         to,
@@ -266,7 +277,7 @@ export default async function handler(req: Request) {
       const gmail       = getGmailClient();
       const senderEmail = (process.env.GMAIL_ADDRESS ?? 'contact@coachello.io').toLowerCase();
 
-      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride });
+      const { to, cc, inReplyTo } = await buildReplyParams({ gmail, senderEmail, email, override: replyOverride, ccOverride: bodyCcOverride });
 
       const raw = buildRawEmail({
         to,

@@ -60,6 +60,23 @@ function initials(name: string, email: string): string {
   return src.slice(0, 2).toUpperCase()
 }
 
+// ── Helpers destinataires (Cc) ──
+// Extrait l'adresse d'une entrée "Nom <email>" ou "email".
+function emailOf(addr: string): string {
+  const m = addr.match(/<([^>]+)>/)
+  return (m ? m[1] : addr).toLowerCase().trim()
+}
+// Nom affichable (prénom/nom si présent, sinon l'email).
+function nameOf(addr: string): string {
+  const m = addr.match(/^\s*"?(.*?)"?\s*<([^>]+)>\s*$/)
+  const nm = m ? m[1].trim() : ''
+  return nm || emailOf(addr)
+}
+// Découpe une liste d'adresses "a@x.com, Nom <b@y.com>" (split naïf sur virgule, comme le backend).
+function splitAddrs(raw?: string): string[] {
+  return (raw ?? '').split(',').map(s => s.trim()).filter(Boolean)
+}
+
 // Parse un body_text contenant des messages quotés en plusieurs ThreadMessage.
 interface ThreadMessage {
   from?: string
@@ -140,6 +157,12 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
   // Cible de réponse : null = dernier message (comportement par défaut), sinon un message précis du thread.
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null)
 
+  // Destinataires en copie (Cc) de la réponse — éditables (chips + ajout).
+  const [selfEmail, setSelfEmail] = useState('')
+  const [ccList, setCcList] = useState<string[]>([])
+  const [ccInput, setCcInput] = useState('')
+  const [ccError, setCcError] = useState<string | null>(null)
+
   const [previewAtt, setPreviewAtt] = useState<{ url: string; filename: string; mimeType: string } | null>(null)
   const [openPrev, setOpenPrev] = useState<Record<number, boolean>>({ 0: true })
   const [detailsPrev, setDetailsPrev] = useState<Record<number, boolean>>({})
@@ -176,6 +199,51 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
     setResponse(email.draft_response ?? '')
     setReplyTarget(null)
   }, [email.id, email.draft_response])
+
+  // Adresse de la boîte gérée ("moi") — pour s'exclure des destinataires en Cc.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setSelfEmail((d?.settings?.gmail_address ?? '').toLowerCase()) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Cc par défaut = reply-all (To + Cc du message cible) sauf nous-mêmes et le destinataire "À".
+  // Recalculé quand on change d'email, de cible de réponse, ou quand on connaît "moi".
+  useEffect(() => {
+    const recipientEmail = emailOf(replyTarget ? replyTarget.from : email.from_email)
+    const srcTo = replyTarget ? replyTarget.to : (email.to_email ?? '')
+    const srcCc = replyTarget ? (replyTarget.cc ?? '') : (email.cc_emails ?? '')
+    const seen = new Set<string>()
+    const auto = [...splitAddrs(srcTo), ...splitAddrs(srcCc)].filter(a => {
+      const e = emailOf(a)
+      if (!e || e === recipientEmail || (selfEmail && e === selfEmail)) return false
+      if (seen.has(e)) return false
+      seen.add(e); return true
+    })
+    setCcList(auto)
+    setCcInput('')
+    setCcError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id, replyTarget, selfEmail])
+
+  const addCc = () => {
+    const raw = ccInput.trim().replace(/[;,]\s*$/, '').trim()
+    if (!raw) return
+    const e = emailOf(raw)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      setCcError('Adresse email invalide')
+      setTimeout(() => setCcError(null), 2500)
+      return
+    }
+    if (ccList.some(a => emailOf(a) === e) || (selfEmail && e === selfEmail)) { setCcInput(''); return }
+    setCcList(prev => [...prev, raw])
+    setCcInput('')
+    setCcError(null)
+  }
+  const removeCc = (idx: number) => setCcList(prev => prev.filter((_, i) => i !== idx))
 
   // Lock à l'ouverture, unlock à la fermeture (sauf en mode analyzing — pas d'id DB stable)
   useEffect(() => {
@@ -262,7 +330,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
       const res = await fetch(`/api/emails/${email.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}) }),
+        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}), ...(email.thread_id ? { cc_override: ccList.join(', ') } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Erreur')
@@ -284,7 +352,7 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
       const atts = outgoingFiles.length > 0 ? await convertFilesToBase64(outgoingFiles) : undefined
       const res = await fetch(`/api/emails/${email.id}/validate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}) }),
+        body: JSON.stringify({ user: 'team', final_response: response, attachments: atts, ...(tmpMeta ?? {}), ...(replyOverride ?? {}), ...(email.thread_id ? { cc_override: ccList.join(', ') } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Erreur lors de l'envoi")
@@ -521,24 +589,50 @@ export default function EmailDetail({ email, onClose, onAction, analyzing, onAna
               </div>
             </div>
 
-            {/* Destinataire de la réponse (modifiable via "Répondre à ce message" dans le thread) */}
+            {/* Destinataires de la réponse : À (modifiable via "Répondre à ce message") + Cc éditables */}
             {!analyzing && email.thread_id && (
-              <div className="px-5 pb-1 flex items-center gap-1.5 flex-shrink-0 text-[12px] min-w-0">
-                <span className="text-[#aaa] flex-shrink-0">À :</span>
-                <span className="font-medium text-[#444] truncate" title={replyTarget ? replyTarget.from : email.from_email}>
-                  {replyTarget ? replyTarget.name : (email.from_name || email.from_email)}
-                </span>
-                {replyTarget ? (
-                  <button
-                    onClick={() => setReplyTarget(null)}
-                    className="text-[11px] text-[#aaa] hover:text-[#E8452A] underline underline-offset-2 transition-colors flex-shrink-0 ml-1"
-                    title="Revenir au dernier message du thread"
-                  >
-                    revenir au dernier message
-                  </button>
-                ) : (
-                  <span className="text-[10px] text-[#bbb] flex-shrink-0 ml-1">(dernier message · « Répondre à ce message » dans le fil pour changer)</span>
-                )}
+              <div className="px-5 pb-1.5 flex flex-col gap-1 flex-shrink-0 text-[12px] min-w-0">
+                {/* À */}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[#aaa] flex-shrink-0 w-7">À :</span>
+                  <span className="font-medium text-[#444] truncate" title={replyTarget ? replyTarget.from : email.from_email}>
+                    {replyTarget ? replyTarget.name : (email.from_name || email.from_email)}
+                  </span>
+                  {replyTarget ? (
+                    <button
+                      onClick={() => setReplyTarget(null)}
+                      className="text-[11px] text-[#aaa] hover:text-[#E8452A] underline underline-offset-2 transition-colors flex-shrink-0 ml-1"
+                      title="Revenir au dernier message du thread"
+                    >
+                      revenir au dernier message
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-[#bbb] flex-shrink-0 ml-1 truncate">(« Répondre à ce message » dans le fil pour changer)</span>
+                  )}
+                </div>
+                {/* Cc — destinataires en copie, éditables */}
+                <div className="flex items-start gap-1.5 min-w-0">
+                  <span className="text-[#aaa] flex-shrink-0 w-7 mt-1">Cc :</span>
+                  <div className="flex flex-wrap items-center gap-1 min-w-0 flex-1">
+                    {ccList.map((addr, i) => (
+                      <span key={emailOf(addr) + i} className="inline-flex items-center gap-1 bg-[#F5F0EA] border border-[#E8E2D9] rounded-full pl-2 pr-1 py-0.5 max-w-full" title={addr}>
+                        <span className="truncate text-[#555] max-w-[160px]">{nameOf(addr)}</span>
+                        <button onClick={() => removeCc(i)} className="text-[#bbb] hover:text-[#E8452A] transition-colors flex-shrink-0" title="Retirer de la copie">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      value={ccInput}
+                      onChange={e => setCcInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCc() } }}
+                      onBlur={addCc}
+                      placeholder={ccList.length ? 'Ajouter…' : 'Ajouter un destinataire en copie…'}
+                      className="flex-1 min-w-[130px] bg-transparent text-[12px] text-[#444] placeholder-[#bbb] focus:outline-none py-0.5"
+                    />
+                  </div>
+                </div>
+                {ccError && <div className="pl-8 text-[11px] text-red-500">{ccError}</div>}
               </div>
             )}
 
