@@ -134,6 +134,9 @@ export default async function handler(req: Request) {
       fromName,
       subject,
       body: effectiveBody,
+      toEmails: toRaw,
+      ccEmails: ccRaw,
+      selfAddress: gmailAddress,
       threadHistory,
       ...(userContext ? { context: userContext } : {}),
     });

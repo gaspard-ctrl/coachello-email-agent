@@ -105,6 +105,9 @@ export async function processOneEmail(
       fromName,
       subject,
       body: effectiveBody,
+      toEmails: toRaw,
+      ccEmails: ccRaw,
+      selfAddress: gmailAddress,
       threadHistory,
     });
 

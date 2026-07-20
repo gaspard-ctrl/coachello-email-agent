@@ -43,6 +43,9 @@ export default async function handler(req: Request) {
       fromName:  email.from_name,
       subject:   email.subject,
       body:      email.body_text ?? '',
+      toEmails:  email.to_email ?? '',
+      ccEmails:  email.cc_emails ?? '',
+      selfAddress: (process.env.GMAIL_ADDRESS ?? '').toLowerCase(),
       context,
     });
 

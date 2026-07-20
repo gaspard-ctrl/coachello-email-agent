@@ -136,6 +136,12 @@ export async function classifyAndDraftEmail(opts: {
   fromName: string;
   subject: string;
   body: string;
+  /** Destinataires "To" de l'email reçu (brut, "Nom <email>, ..."). */
+  toEmails?: string;
+  /** Destinataires "Cc" de l'email reçu (brut). */
+  ccEmails?: string;
+  /** Adresse de la boîte mail traitée (le titulaire). Sert à savoir si on est en To ou en Cc. */
+  selfAddress?: string;
   context?: string;
   threadHistory?: Array<{ from: string; date: string; isOwn: boolean; body: string }>;
 }): Promise<ClaudeEmailResult> {
@@ -162,11 +168,21 @@ ${opts.guide || 'Utilise un ton professionnel, chaleureux et concis. Signe toujo
 ## Règles de classification prioritaires
 ${rulesText}
 
+## Qui es-tu (le titulaire de la boîte)
+Tu gères la boîte mail d'un membre de l'équipe Coachello (son identité et son prénom sont donnés dans le guide ci-dessus).
+L'email à traiter a été reçu SUR CETTE boîte : le titulaire est donc destinataire, soit en "À", soit en copie "Cc" (regarde les champs À/Cc fournis plus bas pour savoir lequel).
+Être en copie (Cc) ne signifie PAS "aucune action". Si l'email demande, attend ou annonce une action, une tâche ou un livrable de la part du titulaire, y compris lorsqu'il est simplement nommé dans le corps (ex : « mon collègue [Prénom du titulaire] en copie vous enverra… » / « [Prénom] s'en occupe »), alors LE TITULAIRE A UNE ACTION À FAIRE, et c'est à lui de la faire.
+
 ## Critères de classification généraux
 - **URGENT** : problème bloquant, insatisfaction forte, délai immédiat requis, client stratégique
-- **IMPORTANT** : question commerciale, demande de devis, partenariat, suivi de mission en cours
-- **NORMAL** : demande d'information, question générale, demande de démo, nouveau contact
-- **FAIBLE** : newsletter, spam probable, email automatique, accusé de réception
+- **IMPORTANT** : question commerciale, demande de devis, partenariat, suivi de mission en cours, onboarding, ou toute action/livrable attendu du titulaire avec un enjeu
+- **NORMAL** : demande d'information, question générale, demande de démo, nouveau contact, action simple attendue du titulaire
+- **FAIBLE** : newsletter, spam probable, email automatique, accusé de réception, pur "pour information" SANS aucune action attendue du titulaire
+
+## Règle d'action (prioritaire)
+- Si l'email assigne, attend ou annonce une action / tâche / livrable de la part du titulaire (même en Cc, même juste nommé dans le corps), il n'est JAMAIS FAIBLE. Classe-le au minimum NORMAL (IMPORTANT si onboarding, client, échéance ou enjeu).
+- Ne classe FAIBLE que si tu es CERTAIN qu'aucune action n'est attendue du titulaire.
+- Ne confonds pas "email interne de coordination" avec "rien à faire" : une coordination interne qui te confie l'envoi de documents EST une action pour toi.
 
 ## Exemples de réponses validées par l'équipe
 ${examplesText}
@@ -185,10 +201,17 @@ Réponds UNIQUEMENT en JSON valide, sans markdown autour, avec exactement cette 
       ).join('\n\n')}\n\n⚠ Ce thread compte déjà ${opts.threadHistory.length} message(s) précédent(s). Tiens compte de cet historique pour la classification : un message qui continue une conversation déjà en cours n'est généralement PAS urgent, sauf nouvelle information critique. Si nous avons déjà répondu, ne propose pas une réponse redondante.\n`
     : '';
 
+  const selfLine = opts.selfAddress
+    ? `**Boîte que tu gères (toi = le titulaire) :** ${opts.selfAddress}\n`
+    : '';
+  const recipientsBlock = (opts.toEmails || opts.ccEmails)
+    ? `**À :** ${opts.toEmails || '(inconnu)'}\n**Cc :** ${opts.ccEmails || '(aucun)'}\n`
+    : '';
+
   const userMessage = `Voici l'email à traiter :
 
-**De :** ${opts.fromName} <${opts.fromEmail}>
-**Objet :** ${opts.subject}
+${selfLine}**De :** ${opts.fromName} <${opts.fromEmail}>
+${recipientsBlock}**Objet :** ${opts.subject}
 ${threadBlock}
 **Corps du nouveau message :**
 ${opts.body}
